@@ -213,6 +213,20 @@ PageType {
             PageController.showErrorMessage(error)
         }
 
+        function onConfigExtracted(requestId) {
+            PageController.showBusyIndicator(false)
+            if (requestId === tabBarStackView.expectingImportId) {
+                tabBarStackView.expectingImportId = -1
+                PageController.goToPage(PageEnum.PageSetupWizardViewConfig)
+            }
+        }
+
+        function onConfigExtractFailed(error, requestId) {
+            PageController.showBusyIndicator(false)
+            tabBarStackView.expectingImportId = -1
+            PageController.showErrorMessage(error)
+        }
+
         function onRestoreAppConfig(data) {
             PageController.showBusyIndicator(true)
             SettingsController.restoreAppConfigFromData(data)
@@ -287,6 +301,10 @@ PageType {
         id: tabBarStackView
         objectName: "tabBarStackView"
 
+        // Id of the async import extraction we triggered, if any;
+        // onConfigExtracted navigates only for our own request.
+        property var expectingImportId: -1
+
         // The nav is a left rail on desktop but a bottom bar on phones, so the
         // content area has to dodge it on a different side. Anchoring left to
         // tabBar.right unconditionally collapsed this to zero width on Android:
@@ -339,12 +357,7 @@ PageType {
                 qsTr("Not now"),
                 function() {
                     PageController.showBusyIndicator(true)
-                    var ok = ImportController.extractConfigFromData(clip.trim())
-                    PageController.showBusyIndicator(false)
-                    if (ok)
-                        PageController.goToPage(PageEnum.PageSetupWizardViewConfig)
-                    else
-                        PageController.showNotificationMessage(qsTr("Could not read the key. Add it manually."))
+                    tabBarStackView.expectingImportId = ImportController.requestConfigFromData(clip.trim())
                 },
                 function() {})
         }

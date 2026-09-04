@@ -43,6 +43,10 @@ private:
     void initUpdateFoundHandler();
 
     CoreController* m_coreController;
+
+    // Request id of the last config import triggered from outside the app
+    // (OS deep link / shared text); -1 when none is in flight.
+    qint64 m_outsideImportId = -1;
 };
 
 #endif // CORESIGNALHANDLERS_H

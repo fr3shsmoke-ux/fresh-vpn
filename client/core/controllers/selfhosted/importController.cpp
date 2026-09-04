@@ -595,7 +595,33 @@ QString ImportController::firstUriFromSubscription(const QString &data) const
         return direct;
     }
 
-    // 2) Base64-encoded subscription blob (the v2ray/xray standard).
+    // 2) JSON subscription bodies, e.g. {"links": ["vless://...", ...]}.
+    //    Remnawave panels return this shape unless the request carries a
+    //    v2ray-family User-Agent.
+    QString jsonText = data.trimmed();
+    if (jsonText.startsWith(QChar(0xFEFF))) {
+        jsonText = jsonText.mid(1);
+    }
+    if (jsonText.startsWith(QLatin1Char('{'))) {
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(data.toUtf8(), &parseError);
+        if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
+            const QJsonArray links = doc.object().value(QStringLiteral("links")).toArray();
+            for (const QJsonValue &link : links) {
+                if (!link.isString()) {
+                    continue;
+                }
+                const QString line = link.toString().trimmed();
+                for (const QString &scheme : schemes) {
+                    if (line.startsWith(scheme)) {
+                        return line;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3) Base64-encoded subscription blob (the v2ray/xray standard).
     QString compact = data;
     compact.remove(QRegularExpression("\\s"));
     if (compact.isEmpty()) {
@@ -640,7 +666,38 @@ QStringList ImportController::allUrisFromSubscription(const QString &data) const
         return direct;
     }
 
-    // 2) Base64-encoded subscription blob (the v2ray/xray standard).
+    // 2) JSON subscription bodies, e.g. {"links": ["vless://...", ...]}.
+    //    Remnawave panels return this shape unless the request carries a
+    //    v2ray-family User-Agent.
+    QString jsonText = data.trimmed();
+    if (jsonText.startsWith(QChar(0xFEFF))) {
+        jsonText = jsonText.mid(1);
+    }
+    if (jsonText.startsWith(QLatin1Char('{'))) {
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(data.toUtf8(), &parseError);
+        if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
+            const QJsonArray links = doc.object().value(QStringLiteral("links")).toArray();
+            QStringList out;
+            for (const QJsonValue &link : links) {
+                if (!link.isString()) {
+                    continue;
+                }
+                const QString line = link.toString().trimmed();
+                for (const QString &scheme : schemes) {
+                    if (line.startsWith(scheme)) {
+                        out.append(line);
+                        break;
+                    }
+                }
+            }
+            if (!out.isEmpty()) {
+                return out;
+            }
+        }
+    }
+
+    // 3) Base64-encoded subscription blob (the v2ray/xray standard).
     QString compact = data;
     compact.remove(QRegularExpression("\\s"));
     if (compact.isEmpty()) {

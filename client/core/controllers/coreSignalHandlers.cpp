@@ -381,10 +381,28 @@ void CoreSignalHandlers::initAndroidConnectionHandler()
         m_coreController->m_connectionController->restoreConnection();
     });
     connect(AndroidController::instance(), &AndroidController::importConfigFromOutside, this, [this](QString data) {
+        // Async: navigate only when our own request completes; failures hide
+        // the busy indicator and surface via the global error handler.
+        // The stack is left untouched on failure.
+        m_outsideImportId = m_coreController->m_importController->requestConfigFromData(data);
+        emit m_coreController->m_pageController->showBusyIndicator(true);
+    });
+    connect(m_coreController->m_importController, &ImportUiController::configExtracted, this, [this](qint64 requestId) {
+        if (requestId != m_outsideImportId) {
+            return;
+        }
+        m_outsideImportId = -1;
+        emit m_coreController->m_pageController->showBusyIndicator(false);
         emit m_coreController->m_pageController->goToPageHome();
-        m_coreController->m_importController->extractConfigFromData(data);
-        data.clear();
         emit m_coreController->m_pageController->goToPageViewConfig();
+    });
+    connect(m_coreController->m_importController, &ImportUiController::configExtractFailed, this, [this](ErrorCode errorCode, qint64 requestId) {
+        Q_UNUSED(errorCode)
+        if (requestId != m_outsideImportId) {
+            return;
+        }
+        m_outsideImportId = -1;
+        emit m_coreController->m_pageController->showBusyIndicator(false);
     });
 #endif
 }
@@ -393,9 +411,28 @@ void CoreSignalHandlers::initIosImportHandler()
 {
 #ifdef Q_OS_IOS
     connect(IosController::Instance(), &IosController::importConfigFromOutside, this, [this](QString data) {
+        // Async: navigate only when our own request completes; failures hide
+        // the busy indicator and surface via the global error handler.
+        // The stack is left untouched on failure.
+        m_outsideImportId = m_coreController->m_importController->requestConfigFromData(data);
+        emit m_coreController->m_pageController->showBusyIndicator(true);
+    });
+    connect(m_coreController->m_importController, &ImportUiController::configExtracted, this, [this](qint64 requestId) {
+        if (requestId != m_outsideImportId) {
+            return;
+        }
+        m_outsideImportId = -1;
+        emit m_coreController->m_pageController->showBusyIndicator(false);
         emit m_coreController->m_pageController->goToPageHome();
-        m_coreController->m_importController->extractConfigFromData(data);
         emit m_coreController->m_pageController->goToPageViewConfig();
+    });
+    connect(m_coreController->m_importController, &ImportUiController::configExtractFailed, this, [this](ErrorCode errorCode, qint64 requestId) {
+        Q_UNUSED(errorCode)
+        if (requestId != m_outsideImportId) {
+            return;
+        }
+        m_outsideImportId = -1;
+        emit m_coreController->m_pageController->showBusyIndicator(false);
     });
     connect(IosController::Instance(), &IosController::importBackupFromOutside, this, [this](QString filePath) {
         emit m_coreController->m_pageController->goToPageHome();

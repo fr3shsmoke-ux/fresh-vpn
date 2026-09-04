@@ -13,6 +13,27 @@ import "../Config"
 PageType {
     id: root
 
+    // Id of the async import extraction we triggered, if any;
+    // onConfigExtracted navigates only for our own request.
+    property var expectingImportId: -1
+
+    Connections {
+        target: ImportController
+
+        function onConfigExtracted(requestId) {
+            PageController.showBusyIndicator(false)
+            if (requestId === root.expectingImportId) {
+                root.expectingImportId = -1
+                PageController.goToPage(PageEnum.PageSetupWizardViewConfig)
+            }
+        }
+
+        function onConfigExtractFailed(error, requestId) {
+            PageController.showBusyIndicator(false)
+            root.expectingImportId = -1
+        }
+    }
+
     BackButtonType {
         id: backButton
 
@@ -89,9 +110,8 @@ PageType {
                 text: qsTr("Continue")
 
                 clickedFunc: function() {
-                    if (ImportController.extractConfigFromData(textKey.textField.text)) {
-                        PageController.goToPage(PageEnum.PageSetupWizardViewConfig)
-                    }
+                    PageController.showBusyIndicator(true)
+                    root.expectingImportId = ImportController.requestConfigFromData(textKey.textField.text)
                 }
             }
         }

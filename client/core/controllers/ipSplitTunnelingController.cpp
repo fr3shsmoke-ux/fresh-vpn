@@ -1,6 +1,7 @@
 #include "ipSplitTunnelingController.h"
 #include "core/utils/networkUtilities.h"
 #include <QJsonObject>
+#include <QDebug>
 
 namespace {
 // Bump on every change to russianDirectSites() so existing installs pick it up.
@@ -104,47 +105,56 @@ QStringList IpSplitTunnelingController::russianDirectSites()
     };
 }
 
-bool IpSplitTunnelingController::addSiteInternal(const QString &hostname, const QString &ip)
+bool IpSplitTunnelingController::addSiteInternal(const QString &hostname, const QStringList &ips)
 {
     QVariantMap existing = m_appSettingsRepository->vpnSites(m_currentRouteMode);
-    if (existing.contains(hostname) && ip.isEmpty()) {
+    if (existing.contains(hostname) && ips.isEmpty()) {
         return false;
     }
 
     for (int i = 0; i < m_sites.size(); i++) {
-        if (m_sites[i].first == hostname && (m_sites[i].second.isEmpty() && !ip.isEmpty())) {
-            m_sites[i].second = ip;
-            m_appSettingsRepository->addVpnSite(m_currentRouteMode, hostname, ip);
+        if (m_sites[i].first == hostname) {
+            bool changed = false;
+            for (const QString &ip : ips) {
+                if (!ip.isEmpty() && !m_sites[i].second.contains(ip)) {
+                    m_sites[i].second.append(ip);
+                    changed = true;
+                }
+            }
+            if (!changed) {
+                return false;
+            }
+            m_appSettingsRepository->addVpnSite(m_currentRouteMode, hostname, ips);
             return true;
-        } else if (m_sites[i].first == hostname && (m_sites[i].second == ip)) {
-            return false;
         }
     }
-    m_sites.append(qMakePair(hostname, ip));
-    m_appSettingsRepository->addVpnSite(m_currentRouteMode, hostname, ip);
+    m_sites.append(qMakePair(hostname, ips));
+    m_appSettingsRepository->addVpnSite(m_currentRouteMode, hostname, ips);
     return true;
 }
 
-void IpSplitTunnelingController::addSites(const QMap<QString, QString> &sites, bool replaceExisting)
+void IpSplitTunnelingController::addSites(const QMap<QString, QStringList> &sites, bool replaceExisting)
 {
     if (replaceExisting) {
         m_sites.clear();
     }
     for (auto it = sites.constBegin(); it != sites.constEnd(); ++it) {
         const QString &hostname = it.key();
-        const QString &ip = it.value();
+        const QStringList &ips = it.value();
         bool found = false;
         for (int i = 0; i < m_sites.size(); i++) {
             if (m_sites[i].first == hostname) {
-                if (!ip.isEmpty()) {
-                    m_sites[i].second = ip;
+                for (const QString &ip : ips) {
+                    if (!ip.isEmpty() && !m_sites[i].second.contains(ip)) {
+                        m_sites[i].second.append(ip);
+                    }
                 }
                 found = true;
                 break;
             }
         }
         if (!found) {
-            m_sites.append(qMakePair(hostname, ip));
+            m_sites.append(qMakePair(hostname, ips));
         }
     }
     if (replaceExisting) {
@@ -162,11 +172,11 @@ bool IpSplitTunnelingController::addSite(const QString &hostname)
     }
     
     if (NetworkUtilities::ipAddressWithSubnetRegExp().exactMatch(normalizedHostname)) {
-        processSite(normalizedHostname, "");
+        processSite(normalizedHostname, {});
         return true;
     }
     
-    if (addSiteInternal(normalizedHostname, "")) {
+    if (addSiteInternal(normalizedHostname, {})) {
         QHostInfo::lookupHost(normalizedHostname, this, SLOT(onHostResolved(QHostInfo)));
         return true;
     }
@@ -214,7 +224,7 @@ bool IpSplitTunnelingController::isSplitTunnelingEnabled() const
     return m_appSettingsRepository->isSitesSplitTunnelingEnabled();
 }
 
-QVector<QPair<QString, QString>> IpSplitTunnelingController::getCurrentSites() const
+QVector<QPair<QString, QStringList>> IpSplitTunnelingController::getCurrentSites() const
 {
     return m_sites;
 }
@@ -224,7 +234,7 @@ void IpSplitTunnelingController::fillSites()
     QVariantMap sitesMap = m_appSettingsRepository->vpnSites(m_currentRouteMode);
     m_sites.clear();
     for (auto it = sitesMap.begin(); it != sitesMap.end(); ++it) {
-        m_sites.append(qMakePair(it.key(), it.value().toString()));
+        m_sites.append(qMakePair(it.key(), SecureAppSettingsRepository::siteIpList(it.value())));
     }
 }
 
@@ -234,8 +244,13 @@ QString IpSplitTunnelingController::normalizeHostname(const QString &hostname) c
     normalized.replace("https://", "");
     normalized.replace("http://", "");
     normalized.replace("ftp://", "");
-    normalized = normalized.split("/", Qt::SkipEmptyParts).first();
-    return normalized;
+
+    if (NetworkUtilities::ipAddressWithSubnetRegExp().exactMatch(normalized)) {
+        return normalized;
+    }
+
+    const QStringList parts = normalized.split("/", Qt::SkipEmptyParts);
+    return parts.isEmpty() ? QString() : parts.first();
 }
 
 bool IpSplitTunnelingController::validateHostname(const QString &hostname) const
@@ -254,29 +269,40 @@ void IpSplitTunnelingController::onHostResolved(const QHostInfo &hostInfo)
 {
     const QList<QHostAddress> &addresses = hostInfo.addresses();
     QString hostname = hostInfo.hostName();
-    
+
+    QStringList allIpv4;
     for (const QHostAddress &addr : addresses) {
         if (addr.protocol() == QAbstractSocket::NetworkLayerProtocol::IPv4Protocol) {
-            processSiteAfterResolve(hostname, addr.toString());
-            break;
+            allIpv4.append(addr.toString());
         }
+    }
+    allIpv4.removeDuplicates();
+    qDebug() << "[SplitTunneling] Host resolved:" << hostname
+             << "-> adding all IPv4 addresses to list:" << allIpv4;
+
+    if (!allIpv4.isEmpty()) {
+        processSiteAfterResolve(hostname, allIpv4);
     }
 }
 
-void IpSplitTunnelingController::processSiteAfterResolve(const QString &hostname, const QString &ip)
+void IpSplitTunnelingController::processSiteAfterResolve(const QString &hostname, const QStringList &ips)
 {
     for (int i = 0; i < m_sites.size(); i++) {
-        if (m_sites[i].first == hostname && m_sites[i].second.isEmpty()) {
-            m_sites[i].second = ip;
-            m_appSettingsRepository->addVpnSite(m_currentRouteMode, hostname, ip);
+        if (m_sites[i].first == hostname) {
+            for (const QString &ip : ips) {
+                if (!ip.isEmpty() && !m_sites[i].second.contains(ip)) {
+                    m_sites[i].second.append(ip);
+                }
+            }
             break;
         }
     }
+    m_appSettingsRepository->addVpnSite(m_currentRouteMode, hostname, ips);
 }
 
-void IpSplitTunnelingController::processSite(const QString &hostname, const QString &ip)
+void IpSplitTunnelingController::processSite(const QString &hostname, const QStringList &ips)
 {
-    addSiteInternal(hostname, ip);
+    addSiteInternal(hostname, ips);
 }
 
 bool IpSplitTunnelingController::importSitesFromJson(const QByteArray& jsonData, bool replaceExisting, QString &errorMessage)
@@ -295,12 +321,25 @@ bool IpSplitTunnelingController::importSitesFromJson(const QByteArray& jsonData,
     }
     
     QJsonArray jsonArray = jsonDocument.array();
-    QMap<QString, QString> sites;
+    QMap<QString, QStringList> sites;
     
     for (auto jsonValue : jsonArray) {
         QJsonObject jsonObject = jsonValue.toObject();
         QString hostname = jsonObject.value("hostname").toString("");
-        QString ip = jsonObject.value("ip").toString("");
+
+        QStringList ips;
+        if (jsonObject.value("ips").isArray()) {
+            const QJsonArray ipsArray = jsonObject.value("ips").toArray();
+            for (const auto &ipValue : ipsArray) {
+                ips.append(ipValue.toString());
+            }
+        }
+        const QString singleIp = jsonObject.value("ip").toString("");
+        if (!singleIp.isEmpty()) {
+            ips.append(singleIp);
+        }
+        ips.removeAll(QString());
+        ips.removeDuplicates();
         
         QString normalizedHostname = normalizeHostname(hostname);
         
@@ -309,7 +348,7 @@ bool IpSplitTunnelingController::importSitesFromJson(const QByteArray& jsonData,
             continue;
         }
         
-        sites.insert(normalizedHostname, ip);
+        sites.insert(normalizedHostname, ips);
     }
     
     addSites(sites, replaceExisting);
@@ -319,13 +358,21 @@ bool IpSplitTunnelingController::importSitesFromJson(const QByteArray& jsonData,
 
 QByteArray IpSplitTunnelingController::exportSitesToJson() const
 {
-    QVector<QPair<QString, QString>> sites = getCurrentSites();
+    QVector<QPair<QString, QStringList>> sites = getCurrentSites();
     QJsonArray jsonArray;
     
     for (const auto &site : sites) {
         QJsonObject jsonObject;
         jsonObject["hostname"] = site.first;
-        jsonObject["ip"] = site.second;
+
+        QJsonArray ipsArray;
+        for (const QString &ip : site.second) {
+            ipsArray.append(ip);
+        }
+        jsonObject["ips"] = ipsArray;
+        // Keep the legacy "ip" field (first address) for backward compatibility.
+        jsonObject["ip"] = site.second.isEmpty() ? QString() : site.second.first();
+
         jsonArray.append(jsonObject);
     }
     

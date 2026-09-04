@@ -319,8 +319,27 @@ PageType {
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
                 visible: isQrCodeVisible
+                         && !(pageShareConnection.isSelfHostedConfig
+                              && (ExportController.config.startsWith("tg://")
+                                  || ExportController.config.startsWith("https://t.me")))
                 horizontalAlignment: Text.AlignHCenter
                 text: qsTr("To read the QR code in the Fresh VPN app, select \"Add server\" → \"I have data to connect\" → \"QR code, key or settings file\"")
+            }
+
+            WarningType {
+                Layout.fillWidth: true
+                Layout.topMargin: 24
+                Layout.bottomMargin: 32
+                Layout.leftMargin: 16
+                Layout.rightMargin: 16
+
+                visible: pageShareConnection.isSelfHostedConfig
+                         && pageShareConnection.configExtension === ".conf"
+                         && !isQrCodeVisible
+                         && ExportController.config !== ""
+
+                iconPath: "qrc:/images/controls/alert-circle.svg"
+                textString: qsTr("This config is too large for a QR code. Share the file or copy the connection settings instead.")
             }
         }
     }

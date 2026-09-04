@@ -171,6 +171,7 @@ PageType {
                         border.color: sel ? root.limeLine : root.line; border.width: 1
                         Behavior on color { ColorAnimation { duration: 120 } }
                         property int lat: root.apiMode ? ServerLatencyController.latencyForCountry("" + countryCode) : ServerLatencyController.latencyFor(serverId)
+                        property bool isOutdatedAwg: !root.apiMode && ServersUiController.serverHasOutdatedAwgContainer(serverId)
                         Connections {
                             target: ServerLatencyController
                             function onLatencyChanged(sid, ms){ if(!root.apiMode && sid === serverId) lat = ms }
@@ -182,7 +183,9 @@ PageType {
                                 Image { anchors.centerIn: parent; width: 26; height: 18; source: root.apiMode ? ("qrc:/countriesFlags/images/flagKit/" + countryImageCode + ".svg") : root.flagFrom(name); visible: root.apiMode ? true : (root.flagFrom(name).length>0); fillMode: Image.PreserveAspectFit }
                                 Rectangle { anchors.centerIn: parent; width: 12; height: 8; radius: 2; color: root.limeStrong; visible: root.apiMode ? false : (root.flagFrom(name).length===0) } }
                             Column { anchors.verticalCenter: parent.verticalCenter; spacing: 2
-                                Text { text: root.apiMode ? CN.localName(countryCode, countryName, LanguageUiController.currentLanguageName === "English") : root.cleanSrv(name); color: root.fg; font.pixelSize: 14; font.weight: 600; elide: Text.ElideRight; width: 200 } }
+                                Text { text: root.apiMode ? CN.localName(countryCode, countryName, LanguageUiController.currentLanguageName === "English") : root.cleanSrv(name); color: root.fg; font.pixelSize: 14; font.weight: 600; elide: Text.ElideRight; width: 200 }
+                                Text { visible: isOutdatedAwg; text: qsTr("AmneziaWG outdated"); color: root.warn; font.pixelSize: 10; font.weight: 700 } }
+                            Image { anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; source: "qrc:/images/controls/alert-circle.svg"; visible: isOutdatedAwg }
                         }
                         Rectangle { anchors.right: parent.right; anchors.rightMargin: 130; anchors.verticalCenter: parent.verticalCenter
                             height: 22; width: msT.implicitWidth + 16; radius: 11; color: Qt.rgba(1,1,1,0.05); border.width: 1; border.color: root.line

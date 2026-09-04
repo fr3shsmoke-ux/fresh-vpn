@@ -17,16 +17,15 @@
 using namespace amnezia;
 
 namespace {
-    // beta: pin Fresh gateway via Cloudflare CDN front gw.fr3sh.online (single endpoint).
+    // Fresh: pin Fresh gateway via Cloudflare CDN front gw.fr3sh.online (single endpoint).
     constexpr char gatewayEndpoint[] = "https://gw.fr3sh.online/";
 }
 
 SecureAppSettingsRepository::SecureAppSettingsRepository(SecureQSettings* settings, QObject *parent)
     : QObject(parent), m_settings(settings)
 {
-    // beta dev/staging: always pin to baked-in Fresh gateway, ignore any stale stored value.
-    m_gatewayEndpoint = QString::fromLatin1(gatewayEndpoint);
-    setValue("Conf/gatewayEndpoint", m_gatewayEndpoint);
+    QString storedEndpoint = value("Conf/gatewayEndpoint", gatewayEndpoint).toString();
+    m_gatewayEndpoint = storedEndpoint.isEmpty() ? gatewayEndpoint : storedEndpoint;
 }
 
 QVariant SecureAppSettingsRepository::value(const QString &key, const QVariant &defaultValue) const
@@ -64,9 +63,9 @@ bool SecureAppSettingsRepository::isAwgDefaultMigrationDone() const
     return value("Conf/awgDefaultMigrationDone", false).toBool();
 }
 
-void SecureAppSettingsRepository::setAwgDefaultMigrationDone(bool done)
-{
-    setValue("Conf/awgDefaultMigrationDone", done);
+void SecureAppSettingsRepository::setAwgDefaultMigrationDone(bool done)
+{
+    setValue("Conf/awgDefaultMigrationDone", done);
 }
 
 bool SecureAppSettingsRepository::isDnsResetMigrationDone() const
@@ -172,34 +171,60 @@ QVariantMap SecureAppSettingsRepository::vpnSites(RouteMode mode) const
     return value("Conf/" + routeModeString(mode)).toMap();
 }
 
+QStringList SecureAppSettingsRepository::siteIpList(const QVariant &value)
+{
+    // QVariant::toStringList() handles both a QStringList/QVariantList and a single QString
+    // (a single string is returned as a one-element list), which covers the legacy format.
+    QStringList result = value.toStringList();
+    result.removeAll(QString());
+    result.removeDuplicates();
+    return result;
+}
+
 void SecureAppSettingsRepository::setVpnSites(RouteMode mode, const QVariantMap &sites)
 {
     setValue("Conf/" + routeModeString(mode), sites);
 }
 
-bool SecureAppSettingsRepository::addVpnSite(RouteMode mode, const QString &site, const QString &ip)
+bool SecureAppSettingsRepository::addVpnSite(RouteMode mode, const QString &site, const QStringList &ips)
 {
     QVariantMap sites = vpnSites(mode);
-    if (sites.contains(site) && ip.isEmpty())
+    const bool siteExisted = sites.contains(site);
+
+    if (siteExisted && ips.isEmpty())
         return false;
 
-    sites.insert(site, ip);
+    QStringList mergedIps = siteIpList(sites.value(site));
+    bool changed = !siteExisted;
+    for (const QString &ip : ips) {
+        if (!ip.isEmpty() && !mergedIps.contains(ip)) {
+            mergedIps.append(ip);
+            changed = true;
+        }
+    }
+
+    if (!changed)
+        return false;
+
+    sites.insert(site, mergedIps);
     setVpnSites(mode, sites);
     emit sitesChanged(mode);
     return true;
 }
 
-void SecureAppSettingsRepository::addVpnSites(RouteMode mode, const QMap<QString, QString> &sites)
+void SecureAppSettingsRepository::addVpnSites(RouteMode mode, const QMap<QString, QStringList> &sites)
 {
     QVariantMap allSites = vpnSites(mode);
     for (auto i = sites.constBegin(); i != sites.constEnd(); ++i) {
         const QString &site = i.key();
-        const QString &ip = i.value();
 
-        if (allSites.contains(site) && allSites.value(site) == ip)
-            continue;
+        QStringList mergedIps = siteIpList(allSites.value(site));
+        for (const QString &ip : i.value()) {
+            if (!ip.isEmpty() && !mergedIps.contains(ip))
+                mergedIps.append(ip);
+        }
 
-        allSites.insert(site, ip);
+        allSites.insert(site, mergedIps);
     }
 
     setVpnSites(mode, allSites);
@@ -332,6 +357,24 @@ void SecureAppSettingsRepository::toggleDevGatewayEnv(bool enabled)
     setValue("Conf/devGatewayEnv", enabled);
 }
 
+QByteArray SecureAppSettingsRepository::readGatewayProxyUrls(const QString &cacheKey) const
+{
+    if (cacheKey.isEmpty()) {
+        return {};
+    }
+
+    return value(QStringLiteral("Conf/proxyUrls/") + cacheKey).toByteArray();
+}
+
+void SecureAppSettingsRepository::writeGatewayProxyUrls(const QString &cacheKey, const QByteArray &proxyUrlsEncrypted)
+{
+    if (cacheKey.isEmpty()) {
+        return;
+    }
+
+    setValue(QStringLiteral("Conf/proxyUrls/") + cacheKey, proxyUrlsEncrypted);
+}
+
 bool SecureAppSettingsRepository::isKillSwitchEnabled() const
 {
     return value("Conf/killSwitchEnabled", true).toBool();
@@ -340,16 +383,6 @@ bool SecureAppSettingsRepository::isKillSwitchEnabled() const
 void SecureAppSettingsRepository::setKillSwitchEnabled(bool enabled)
 {
     setValue("Conf/killSwitchEnabled", enabled);
-}
-
-bool SecureAppSettingsRepository::isAutoUpdateEnabled() const
-{
-    return value("Conf/autoUpdateEnabled", true).toBool();
-}
-
-void SecureAppSettingsRepository::setAutoUpdateEnabled(bool enabled)
-{
-    setValue("Conf/autoUpdateEnabled", enabled);
 }
 
 bool SecureAppSettingsRepository::isStrictKillSwitchEnabled() const
@@ -401,6 +434,26 @@ bool SecureAppSettingsRepository::isNewsNotifications() const
 void SecureAppSettingsRepository::setNewsNotifications(bool enabled)
 {
     setValue("Conf/newsNotifications", enabled);
+}
+
+bool SecureAppSettingsRepository::isAutoUpdateEnabled() const
+{
+    return value("Conf/autoUpdateEnabled", true).toBool();
+}
+
+void SecureAppSettingsRepository::setAutoUpdateEnabled(bool enabled)
+{
+    setValue("Conf/autoUpdateEnabled", enabled);
+}
+
+bool SecureAppSettingsRepository::isAutoUpdateCheckEnabled() const
+{
+    return value("Conf/autoUpdateCheck", true).toBool();
+}
+
+void SecureAppSettingsRepository::setAutoUpdateCheckEnabled(bool enabled)
+{
+    setValue("Conf/autoUpdateCheck", enabled);
 }
 
 bool SecureAppSettingsRepository::isSaveLogs() const
@@ -458,16 +511,6 @@ bool SecureAppSettingsRepository::isHomeAdLabelVisible() const
 void SecureAppSettingsRepository::disableHomeAdLabel()
 {
     setValue("Conf/homeAdLabelVisible", false);
-}
-
-bool SecureAppSettingsRepository::isPremV1MigrationReminderActive() const
-{
-    return value("Conf/premV1MigrationReminderActive", true).toBool();
-}
-
-void SecureAppSettingsRepository::disablePremV1MigrationReminder()
-{
-    setValue("Conf/premV1MigrationReminderActive", false);
 }
 
 QByteArray SecureAppSettingsRepository::backupAppConfig() const

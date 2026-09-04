@@ -148,10 +148,36 @@ PageType {
     }
 
     onConnChanged: { if(conn){ root.connStart = Date.now() } else { root.connStart = 0; root.connElapsed = 0 } }
-    Component.onCompleted: { root.pollStatus(); root.acOn = SettingsController.isAutoConnectEnabled(); root.refreshProto(); root.kickCountryPing() }
-    Connections { target: ServersUiController; function onDefaultServerIdChanged(){ root.refreshProto(); root.kickCountryPing() } }
+    Component.onCompleted: { root.pollStatus(); root.acOn = SettingsController.isAutoConnectEnabled(); root.refreshProto(); root.kickCountryPing(); root.updateApiProtocolState() }
+    Connections { target: ServersUiController; function onDefaultServerIdChanged(){ root.refreshProto(); root.kickCountryPing(); root.updateApiProtocolState() } }
 
     Timer { interval: 2500; running: true; repeat: false; onTriggered: root.kickCountryPing() }
+
+    // Upstream: API servers can expose several protocols (AmneziaWG/VLESS).
+    // Keep the Fresh look, but accept the upstream protocol-switch feature.
+    property var apiAvailableProtocols: []
+    property string apiCurrentProtocol: ""
+
+    readonly property bool isApiProtocolSelectionVisible: ServersUiController.isDefaultServerFromApi && root.apiAvailableProtocols.length > 0
+    readonly property bool isOutdatedAwgWarningVisible: ServersUiController.defaultServerHasOutdatedAwgContainer
+
+    function updateApiProtocolState() {
+        if (ServersUiController.isDefaultServerFromApi) {
+            root.apiAvailableProtocols = SubscriptionUiController.availableProtocols(ServersUiController.defaultServerId)
+            root.apiCurrentProtocol = SubscriptionUiController.currentProtocol(ServersUiController.defaultServerId)
+        } else {
+            root.apiAvailableProtocols = []
+            root.apiCurrentProtocol = ""
+        }
+    }
+
+    function protocolDisplayName(protocol) {
+        switch (protocol) {
+        case "awg": return "AmneziaWG"
+        case "vless": return "VLESS"
+        default: return protocol
+        }
+    }
 
     // Real per-country ping: the subscription lists every country host, so probe them directly.
     Connections {
@@ -346,6 +372,64 @@ PageType {
                     }
                 }
 
+                // ===== Outdated AmneziaWG warning (upstream feature, Fresh style) =====
+                Rectangle {
+                    visible: root.isOutdatedAwgWarningVisible
+                    width: parent.width; radius: 14
+                    color: Qt.rgba(184/255, 230/255, 65/255, 0.08)
+                    border.color: root.limeStrong; border.width: 1
+                    height: awgWarnTxt.implicitHeight + 24
+                    Row {
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 14
+                        anchors.verticalCenter: parent.verticalCenter; spacing: 10
+                        Image { source: "qrc:/images/controls/alert-circle.svg"; width: 18; height: 18; anchors.verticalCenter: parent.verticalCenter }
+                        Text {
+                            id: awgWarnTxt
+                            width: parent.width - 28; wrapMode: Text.WordWrap
+                            text: qsTr("AmneziaWG 2.0 is outdated and no longer supported. Continued use requires a fresh installation of the AmneziaWG 3.1 container.")
+                            color: root.limeStrong; font.pixelSize: 12
+                        }
+                    }
+                }
+
+                // ===== API protocol selector (upstream feature, Fresh style) =====
+                Column {
+                    width: parent.width; spacing: 8
+                    visible: root.isApiProtocolSelectionVisible
+                    Text { text: qsTr("VPN protocol"); color: root.mute; font.pixelSize: 11; font.weight: 800; leftPadding: 4 }
+                    Rectangle {
+                        width: parent.width; height: 46; radius: 14; color: root.card; border.color: root.line; border.width: 1
+                        scale: apiProtoM.pressed ? 0.99 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
+                        RowLayout {
+                            anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 14; spacing: 11
+                            Text {
+                                Layout.fillWidth: true; elide: Text.ElideRight
+                                text: root.apiAvailableProtocols.length > 1
+                                    ? root.protocolDisplayName(root.apiCurrentProtocol)
+                                    : (root.apiAvailableProtocols.length > 0 ? root.protocolDisplayName(root.apiAvailableProtocols[0]) : "")
+                                color: root.fg; font.pixelSize: 14; font.weight: 700
+                            }
+                            Image { source: "qrc:/images/controls/chevron-right.svg"; Layout.preferredWidth: 16; Layout.preferredHeight: 16; Layout.alignment: Qt.AlignVCenter; opacity: 0.5; visible: root.apiAvailableProtocols.length > 1 }
+                        }
+                        MouseArea {
+                            id: apiProtoM; anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            enabled: root.apiAvailableProtocols.length > 1
+                            onClicked: {
+                                if (ConnectionController.isConnectionInProgress) {
+                                    PageController.showNotificationMessage(qsTr("Unable change protocol while trying to make an active connection"))
+                                    return
+                                }
+                                if (ConnectionController.isConnected) {
+                                    PageController.showNotificationMessage(qsTr("Cannot change protocol during active connection"))
+                                    return
+                                }
+                                protocolSelectionDrawer.openTriggered()
+                            }
+                        }
+                    }
+                }
+
                 // ===== Protocols =====
                 Column {
                     width: parent.width; spacing: 8
@@ -498,6 +582,121 @@ PageType {
             id: thM
             anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
             onClicked: AmneziaStyle.isDark = !AmneziaStyle.isDark
+        }
+    }
+
+    DrawerType2 {
+        id: protocolSelectionDrawer
+        objectName: "protocolSelectionDrawer"
+
+        anchors.fill: parent
+
+        expandedStateContent: Item {
+            id: protocolDrawerContainer
+
+            implicitHeight: root.height * 0.5
+
+            Component.onCompleted: {
+                protocolSelectionDrawer.expandedHeight = protocolDrawerContainer.implicitHeight
+            }
+
+            ColumnLayout {
+                id: protocolDrawerHeader
+
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.topMargin: 16
+
+                BackButtonType {
+                    id: protocolDrawerBackButton
+
+                    Layout.fillWidth: true
+
+                    backButtonImage: "qrc:/images/controls/arrow-left.svg"
+                    backButtonFunction: function() { protocolSelectionDrawer.closeTriggered() }
+                }
+
+                Header2Type {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 16
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
+
+                    headerText: qsTr("VPN protocol")
+                }
+            }
+
+            ListViewType {
+                id: protocolDrawerListView
+
+                anchors.top: protocolDrawerHeader.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.topMargin: 16
+
+                model: root.apiAvailableProtocols
+
+                ButtonGroup {
+                    id: protocolDrawerButtonGroup
+                }
+
+                delegate: Item {
+                    implicitWidth: protocolDrawerListView.width
+                    implicitHeight: protocolDrawerDelegate.implicitHeight
+
+                    ColumnLayout {
+                        id: protocolDrawerDelegate
+
+                        anchors.fill: parent
+                        anchors.leftMargin: 16
+                        anchors.rightMargin: 16
+
+                        VerticalRadioButton {
+                            id: protocolDrawerRadioButton
+
+                            Layout.fillWidth: true
+
+                            text: root.protocolDisplayName(modelData)
+
+                            ButtonGroup.group: protocolDrawerButtonGroup
+
+                            checkable: !ConnectionController.isConnected
+                            checked: modelData === root.apiCurrentProtocol
+
+                            onClicked: {
+                                protocolSelectionDrawer.closeTriggered()
+
+                                if (modelData === root.apiCurrentProtocol) {
+                                    return
+                                }
+
+                                if (ConnectionController.isConnected) {
+                                    PageController.showNotificationMessage(qsTr("Cannot change protocol during active connection"))
+                                    return
+                                }
+
+                                PageController.showBusyIndicator(true)
+                                ServersUiController.setProcessedServerId(ServersUiController.defaultServerId)
+                                SubscriptionUiController.setCurrentProtocol(ServersUiController.defaultServerId, modelData)
+                                if (!SubscriptionUiController.updateServiceFromGateway(ServersUiController.defaultServerId, "", "", true)) {
+                                    SubscriptionUiController.setCurrentProtocol(ServersUiController.defaultServerId, root.apiCurrentProtocol)
+                                }
+                                root.updateApiProtocolState()
+                                PageController.showBusyIndicator(false)
+                            }
+
+                            Keys.onEnterPressed: protocolDrawerRadioButton.clicked()
+                            Keys.onReturnPressed: protocolDrawerRadioButton.clicked()
+                        }
+
+                        DividerType {
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+            }
         }
     }
 }

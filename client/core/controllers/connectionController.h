@@ -75,7 +75,6 @@ signals:
     void switchedToBackup(const QString &serverId);
     void openConnectionRequested(const QString &serverId, DockerContainer container, const QJsonObject &vpnConfiguration);
     void closeConnectionRequested();
-    void setConnectionStateRequested(Vpn::ConnectionState state);
     void killSwitchModeChangedRequested(bool enabled);
 
 #ifdef Q_OS_ANDROID

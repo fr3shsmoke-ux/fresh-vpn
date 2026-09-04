@@ -14,6 +14,18 @@ import "../Components"
 PageType {
     id: root
 
+    Connections {
+        target: UpdateController
+
+        function onUpdateNotFound() {
+            PageController.showNotificationMessage(qsTr("You have the latest version of AmneziaVPN"))
+        }
+
+        function onUpdateCheckFailed() {
+            PageController.showNotificationMessage(qsTr("Failed to check for updates"))
+        }
+    }
+
     BackButtonType {
         id: backButton
 
@@ -177,6 +189,72 @@ PageType {
 
             DividerType {}
 
+            Header2TextType {
+                Layout.fillWidth: true
+                Layout.topMargin: 40
+                Layout.leftMargin: 16
+                Layout.rightMargin: 16
+
+                text: qsTr("Contacts")
+            }
+
+            LabelWithButtonType {
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+
+                text: qsTr("Telegram group")
+                descriptionText: qsTr("To discuss features")
+                leftImageSource: "qrc:/images/controls/telegram.svg"
+
+                clickedFunction: function() {
+                    Qt.openUrlExternally(qsTr("https://telegram.me/amnezia_vpn_en"))
+                }
+            }
+
+            DividerType {}
+
+            LabelWithButtonType {
+                Layout.fillWidth: true
+
+                text: qsTr("support@amnezia.org")
+                descriptionText: qsTr("For reviews and bug reports")
+                leftImageSource: "qrc:/images/controls/mail.svg"
+
+                clickedFunction: function() {
+                    Qt.openUrlExternally(qsTr("mailto:support@amnezia.org"))
+                }
+            }
+
+            DividerType {}
+
+            LabelWithButtonType {
+                Layout.fillWidth: true
+
+                text: qsTr("GitHub")
+                descriptionText: qsTr("Discover the source code")
+                leftImageSource: "qrc:/images/controls/github.svg"
+
+                clickedFunction: function() {
+                    Qt.openUrlExternally(qsTr("https://github.com/amnezia-vpn/amnezia-client"))
+                }
+            }
+
+            DividerType {}
+
+            LabelWithButtonType {
+                Layout.fillWidth: true
+
+                text: qsTr("Website")
+                descriptionText: qsTr("Visit official website")
+                leftImageSource: "qrc:/images/controls/amnezia.svg"
+
+                clickedFunction: function() {
+                    Qt.openUrlExternally(LanguageUiController.getCurrentSiteUrl())
+                }
+            }
+
+            DividerType {}
+
             CaptionTextType {
                 Layout.fillWidth: true
                 Layout.topMargin: 48
@@ -196,6 +274,52 @@ PageType {
                             clickCount++
                         }
                     }
+                }
+            }
+
+            BasicButtonType {
+                id: checkUpdatesButton
+
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: 8
+                Layout.bottomMargin: 16
+                implicitHeight: 48
+
+                defaultColor: AmneziaStyle.color.surfaceBase
+                hoveredColor: AmneziaStyle.color.surfaceHovered
+                pressedColor: AmneziaStyle.color.surfacePressed
+                disabledColor: AmneziaStyle.color.surfaceBase
+                textColor: AmneziaStyle.color.surfaceInverse
+                borderWidth: 1
+                borderColor: AmneziaStyle.color.borderSoft
+
+                enabled: !UpdateController.isCheckRunning
+
+                text: UpdateController.isCheckRunning ? qsTr("Checking...") : qsTr("Check for updates")
+
+                clickedFunc: function() {
+                    UpdateController.checkForUpdates()
+                }
+            }
+
+            BasicButtonType {
+                id: privacyPolicyButton
+
+                Layout.alignment: Qt.AlignHCenter
+                Layout.bottomMargin: 16
+                Layout.topMargin: -15
+                implicitHeight: 25
+
+                defaultColor: AmneziaStyle.color.transparent
+                hoveredColor: AmneziaStyle.color.translucentWhite
+                pressedColor: AmneziaStyle.color.sheerWhite
+                disabledColor: AmneziaStyle.color.mutedGray
+                textColor: AmneziaStyle.color.goldenApricot
+
+                text: qsTr("Privacy Policy")
+
+                clickedFunc: function() {
+                    Qt.openUrlExternally(LanguageUiController.getCurrentSiteUrl("policy"))
                 }
             }
         }

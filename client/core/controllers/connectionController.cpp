@@ -7,6 +7,7 @@
 #include "core/utils/protocolEnum.h"
 #include "core/protocols/protocolUtils.h"
 #include "core/utils/constants/configKeys.h"
+#include "core/utils/payloadSender.h"
 #include "core/utils/utilities.h"
 #include "core/utils/serverConfigUtils.h"
 #include "version.h"
@@ -60,7 +61,6 @@ ConnectionController::ConnectionController(SecureServersRepository* serversRepos
     });
     connect(this, &ConnectionController::openConnectionRequested, m_vpnConnection, &VpnConnection::connectToVpn, Qt::QueuedConnection);
     connect(this, &ConnectionController::closeConnectionRequested, m_vpnConnection, &VpnConnection::disconnectFromVpn, Qt::QueuedConnection);
-    connect(this, &ConnectionController::setConnectionStateRequested, m_vpnConnection, &VpnConnection::setConnectionState, Qt::QueuedConnection);
     connect(this, &ConnectionController::killSwitchModeChangedRequested, m_vpnConnection, &VpnConnection::onKillSwitchModeChanged, Qt::QueuedConnection);
 #ifdef Q_OS_ANDROID
     connect(this, &ConnectionController::restoreConnectionRequested, m_vpnConnection, &VpnConnection::restoreConnection, Qt::QueuedConnection);
@@ -74,9 +74,7 @@ bool ConnectionController::isConnected() const
 
 void ConnectionController::setConnectionState(Vpn::ConnectionState state)
 {
-    if (m_vpnConnection) {
-        emit setConnectionStateRequested(state);
-    }
+    emit connectionStateChanged(state);
 }
 
 ErrorCode ConnectionController::defaultContainerForServer(const QString &serverId, DockerContainer &container) const
@@ -136,7 +134,8 @@ ErrorCode ConnectionController::isConnectionSupported(const QString &serverId) c
         return ErrorCode::AmneziaServiceNotRunning;
     }
 
-    if (serverConfigUtils::isLegacyApiSubscription(m_serversRepository->serverKind(serverId))) {
+    const serverConfigUtils::ConfigType kind = m_serversRepository->serverKind(serverId);
+    if (serverConfigUtils::isLegacyApiSubscription(kind)) {
         return ErrorCode::LegacyApiV1NotSupportedError;
     }
 
@@ -147,6 +146,9 @@ ErrorCode ConnectionController::isConnectionSupported(const QString &serverId) c
     }
 
     if (container == DockerContainer::None) {
+        if (serverConfigUtils::isApiV2Subscription(kind)) {
+            return ErrorCode::NoError;
+        }
         return ErrorCode::NoInstalledContainersError;
     }
 
@@ -242,6 +244,11 @@ ErrorCode ConnectionController::launchConnection(const QString &serverId)
     ErrorCode errorCode = prepareConnection(serverId, vpnConfiguration, container);
     if (errorCode != ErrorCode::NoError) {
         return errorCode;
+    }
+
+    const auto apiV2 = m_serversRepository->apiV2Config(serverId);
+    if (apiV2.has_value() && !apiV2->sendPayload.isEmpty()) {
+        PayloadSender::sendAll(apiV2->sendPayload);
     }
 
     emit openConnectionRequested(serverId, container, vpnConfiguration);

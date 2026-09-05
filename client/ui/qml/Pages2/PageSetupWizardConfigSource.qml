@@ -16,6 +16,10 @@ import "../Config"
 PageType {
     id: root
 
+    // Id of the async import extraction we triggered, if any;
+    // onConfigExtracted navigates only for our own request.
+    property var expectingImportId: -1
+
     Connections {
         target: ImportController
 
@@ -24,6 +28,19 @@ PageType {
                 PageController.closePage()
             }
             PageController.goToPage(PageEnum.PageSetupWizardViewConfig)
+        }
+
+        function onConfigExtracted(requestId) {
+            PageController.showBusyIndicator(false)
+            if (requestId === root.expectingImportId) {
+                root.expectingImportId = -1
+                PageController.goToPage(PageEnum.PageSetupWizardViewConfig)
+            }
+        }
+
+        function onConfigExtractFailed(error, requestId) {
+            PageController.showBusyIndicator(false)
+            root.expectingImportId = -1
         }
     }
 
@@ -234,11 +251,7 @@ PageType {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         PageController.showBusyIndicator(true)
-                        var ok = ImportController.extractConfigFromData(keyField.text)
-                        PageController.showBusyIndicator(false)
-                        if (ok) {
-                            PageController.goToPage(PageEnum.PageSetupWizardViewConfig)
-                        }
+                        root.expectingImportId = ImportController.requestConfigFromData(keyField.text)
                     }
                 }
             }
@@ -328,7 +341,7 @@ PageType {
 
         property string title: qsTr("Fresh VPN")
         property string description: qsTr("The easiest way to connect to the VPN")
-        property string imageSource: "qrc:/images/controls/fresh-leaf.svg"
+        property string imageSource: "qrc:/images/logo-fresh.svg"
         property bool featuredAmneziaConnection: true
         property bool isVisible: false  // Fresh: gateway auto-provision not wired for self-hosted seed -> hide (was ErrorCode 1100); key-paste above is the working path
         property var handler: function() {

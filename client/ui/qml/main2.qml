@@ -222,22 +222,12 @@ Window  {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 10
 
-            Rectangle {
-                width: 26; height: 26; radius: 8
+            Image {
+                width: 26; height: 26
                 anchors.verticalCenter: parent.verticalCenter
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#B8E641" }
-                    GradientStop { position: 1.0; color: "#1F7A3A" }
-                }
-                Shape {
-                    anchors.centerIn: parent
-                    width: 15; height: 15
-                    ShapePath {
-                        fillColor: "#0E0E10"
-                        strokeWidth: 0
-                        PathSvg { path: "M7.5 1 C4 3 2.5 5.5 2.5 8.4 a4.6 4.6 0 0 0 9.2 0 c0 -1.9 -0.9 -3.7 -2.3 -5.1 -0.5 2.3 -1.9 3.2 -3.2 4.1 0.5 -2.3 0.9 -4.1 0.9 -6 z" }
-                    }
-                }
+                source: "qrc:/images/logo-fresh.svg"
+                fillMode: Image.PreserveAspectFit
+                smooth: true
             }
 
             Row {

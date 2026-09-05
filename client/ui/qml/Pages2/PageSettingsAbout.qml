@@ -40,27 +40,16 @@ PageType {
         header: ColumnLayout {
             width: listView.width
 
-            // Fresh VPN brand lockup (lime mark + wordmark) - no external image asset
-            Rectangle {
+            // Fresh VPN brand mark
+            Image {
                 id: logoMark
                 Layout.alignment: Qt.AlignCenter
                 Layout.topMargin: 40
                 Layout.preferredWidth: 96
                 Layout.preferredHeight: 96
-                radius: 26
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#C8F050" }
-                    GradientStop { position: 1.0; color: "#3E8E2B" }
-                }
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "F"
-                    color: "#0E1206"
-                    font.pixelSize: 56
-                    font.bold: true
-                    font.family: "Bricolage Grotesque"
-                }
+                source: "qrc:/images/logo-fresh.svg"
+                fillMode: Image.PreserveAspectFit
+                smooth: true
             }
 
             Header2TextType {

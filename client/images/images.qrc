@@ -8,6 +8,7 @@
     <qresource prefix="/images">
         <file>amneziaBigLogo.png</file>
         <file>AmneziaVPN.png</file>
+        <file>logo-fresh.svg</file>
         <file>earth_day.jpg</file>
         <file>earth_sheet.png</file>
         <file>controls/alert-circle.svg</file>

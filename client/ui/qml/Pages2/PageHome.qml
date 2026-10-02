@@ -9,6 +9,7 @@ import "./"
 import "../Controls2"
 import "../Components"
 import "../Components/countrynames.js" as CN
+import "../Components/appendpoint.js" as AppEndpoint
 
 PageType {
     id: root
@@ -31,7 +32,10 @@ PageType {
     // Раньше адрес указывал на одну конкретную машину (порт 8088, без шифрования),
     // и когда её вывели из работы 10.08.2026, показ состояния у людей замер.
     // Домен от машин не зависит: узлы меняются, адрес остаётся.
-    property string statusUrl: "https://app.fr3sh.online/node-status.json"
+    // С 02.10.2026 адрес живёт в Components/appendpoint.js: тот же хост
+    // понадобился экрану «Профиль» под ручку цен, и двух копий строки быть
+    // не должно.
+    property string statusUrl: AppEndpoint.nodeStatusUrl()
     property var loadByCountry: ({})
     property bool feedKnown: false
     property bool allServersOk: false

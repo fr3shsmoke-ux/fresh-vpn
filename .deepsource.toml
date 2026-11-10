@@ -1,0 +1,21 @@
+version = 1
+
+[[analyzers]]
+name = "cxx"
+enabled = true
+
+[[analyzers]]
+name = "java"
+enabled = true
+
+[[analyzers]]
+name = "kotlin"
+enabled = true
+
+[[analyzers]]
+name = "go"
+enabled = true
+
+[[analyzers]]
+name = "python"
+enabled = true

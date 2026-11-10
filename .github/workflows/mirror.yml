@@ -29,25 +29,27 @@ jobs:
         if: github.event.deleted
         run: |
           git init -q m && cd m
-          git push "https://x-access-token:${TARGET_PAT}@github.com/${{ steps.t.outputs.repo }}.git" --delete "${GITHUB_REF}" || echo "already deleted"
+          git -c http.extraheader= push "https://x-access-token:${TARGET_PAT}@github.com/${{ steps.t.outputs.repo }}.git" --delete "${GITHUB_REF}" || echo "already deleted"
 
       - name: Checkout
         if: "!github.event.deleted"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Push to mirror
         if: "!github.event.deleted"
         run: |
+          git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
           URL="https://x-access-token:${TARGET_PAT}@github.com/${{ steps.t.outputs.repo }}.git"
-          REMOTE_SHA=$(git ls-remote "$URL" "$GITHUB_REF" | cut -f1)
+          REMOTE_SHA=$(git -c http.extraheader= ls-remote "$URL" "$GITHUB_REF" | cut -f1)
           if [ "$REMOTE_SHA" = "$GITHUB_SHA" ]; then echo "mirror already up to date"; exit 0; fi
           if [ -n "$REMOTE_SHA" ] && [ "${{ github.event.forced }}" != "true" ]; then
-            git fetch -q "$URL" "$GITHUB_REF" || true
+            git -c http.extraheader= fetch -q "$URL" "$GITHUB_REF" || true
             if git merge-base --is-ancestor "$GITHUB_SHA" "$REMOTE_SHA" 2>/dev/null; then
               echo "mirror is ahead (echo push) - nothing to do"; exit 0
             fi
           fi
           F=""; [ "${{ github.event.forced }}" = "true" ] && F="--force"
-          git push $F "$URL" "${GITHUB_SHA}:${GITHUB_REF}"
+          git -c http.extraheader= push $F "$URL" "${GITHUB_SHA}:${GITHUB_REF}"

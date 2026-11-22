@@ -1,4 +1,5 @@
 #include "serverLatencyController.h"
+#include "hwidHeaders.h"
 
 #include <QTcpSocket>
 #include <QElapsedTimer>
@@ -9,8 +10,6 @@
 #include <QSharedPointer>
 #include <QTimer>
 #include <QNetworkRequest>
-#include <QCryptographicHash>
-#include <QSysInfo>
 #include <QRegularExpression>
 #include <QUrl>
 #include <QVector>
@@ -154,17 +153,7 @@ void ServerLatencyController::measureCountries(const QString& subscriptionKey)
     QNetworkRequest req(url);
     // Subscription endpoints commonly gate on the client user-agent.
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("Happ/1.0"));
-    QByteArray hwidRaw = QSysInfo::machineUniqueId();
-    if (hwidRaw.isEmpty()) {
-        hwidRaw = QSysInfo::machineHostName().toUtf8() + ":" + QSysInfo::productType().toUtf8();
-    }
-    const QByteArray hwidHash = QCryptographicHash::hash(hwidRaw, QCryptographicHash::Sha256).toHex().left(32);
-    if (!hwidHash.isEmpty()) {
-        req.setRawHeader("x-hwid", hwidHash);
-    }
-    req.setRawHeader("x-device-os", QSysInfo::productType().toUtf8());
-    req.setRawHeader("x-ver-os", QSysInfo::productVersion().toUtf8());
-    req.setRawHeader("x-device-model", QSysInfo::prettyProductName().toUtf8());
+    FreshHwid::applyHeaders(req);
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
     QNetworkReply* reply = m_net->get(req);

@@ -1,7 +1,7 @@
 #include "importUiController.h"
+#include "hwidHeaders.h"
 
 #include <QDebug>
-#include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QMutex>
@@ -11,7 +11,6 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
-#include <QSysInfo>
 #include <QTimer>
 #include <QUrl>
 #include <QImage>
@@ -384,17 +383,7 @@ QString ImportUiController::fetchSubscriptionBody(const QString &url, QString &e
     // base64 share-URI list, which the core parser understands universally.
     request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("v2rayNG/1.8.5 (FreshVPN)"));
     request.setRawHeader("Accept", "*/*");
-    QByteArray hwidRaw = QSysInfo::machineUniqueId();
-    if (hwidRaw.isEmpty()) {
-        hwidRaw = QSysInfo::machineHostName().toUtf8() + ":" + QSysInfo::productType().toUtf8();
-    }
-    const QByteArray hwidHash = QCryptographicHash::hash(hwidRaw, QCryptographicHash::Sha256).toHex().left(32);
-    if (!hwidHash.isEmpty()) {
-        request.setRawHeader("x-hwid", hwidHash);
-    }
-    request.setRawHeader("x-device-os", QSysInfo::productType().toUtf8());
-    request.setRawHeader("x-ver-os", QSysInfo::productVersion().toUtf8());
-    request.setRawHeader("x-device-model", QSysInfo::prettyProductName().toUtf8());
+    FreshHwid::applyHeaders(request);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
     QNetworkReply *reply = manager.get(request);

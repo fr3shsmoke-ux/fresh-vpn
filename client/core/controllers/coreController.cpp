@@ -7,6 +7,7 @@
 #include "core/utils/selfhosted/sshSession.h"
 #include "core/controllers/selfhosted/installController.h"
 #include "core/controllers/selfhosted/importController.h"
+#include "ui/controllers/importUiController.h"
 #include "core/controllers/coreSignalHandlers.h"
 #include "logger.h"
 #include "secureQSettings.h"
@@ -305,6 +306,14 @@ void CoreController::initSignalHandlers()
             }
         });
     }
+
+    // Fresh VPN: auto-refresh imported subscription if a subscription URL is saved
+    QTimer::singleShot(2500, this, [this]() {
+        if (m_importController && m_importController->hasSubscriptionUrl()) {
+            qDebug() << "Auto-refreshing saved subscription in background...";
+            m_importController->refreshSubscription();
+        }
+    });
 }
 
 void CoreController::updateTranslator(const QLocale &locale)

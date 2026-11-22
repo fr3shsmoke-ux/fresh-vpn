@@ -38,6 +38,7 @@ private:
     int m_tun2socksRetryCount = 0;
     static constexpr int maxTun2SocksRetries = 5;
     static constexpr int tun2socksRetryDelayMs = 400;
+    bool m_isStopping = false;
 };
 
 #endif // XRAYPROTOCOL_H

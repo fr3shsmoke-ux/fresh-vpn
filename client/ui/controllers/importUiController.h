@@ -32,6 +32,9 @@ public slots:
     int getConfigsCount();
     void processNativeWireGuardConfig();
     QString readTextFile(const QString &fileName);
+    bool refreshSubscription();
+    QString lastSubscriptionUrl() const;
+    bool hasSubscriptionUrl() const;
 
 #if defined Q_OS_ANDROID || defined Q_OS_IOS
     void startDecodingQr();
@@ -51,6 +54,7 @@ signals:
     void qrDecodingFinished();
     void restoreAppConfig(const QByteArray &data);
     void importConfigChanged();
+    void subscriptionRefreshed(bool success, int count);
 
 private:
 #if defined Q_OS_ANDROID || defined Q_OS_IOS

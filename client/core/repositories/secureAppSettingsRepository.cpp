@@ -502,3 +502,13 @@ void SecureAppSettingsRepository::setXraySavedConfigs(const QByteArray &data)
 {
     setValue("Xray/savedConfigs", data);
 }
+
+QString SecureAppSettingsRepository::lastSubscriptionUrl() const
+{
+    return value("Conf/lastSubscriptionUrl", "").toString();
+}
+
+void SecureAppSettingsRepository::setLastSubscriptionUrl(const QString &url)
+{
+    setValue("Conf/lastSubscriptionUrl", url);
+}

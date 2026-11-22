@@ -153,7 +153,20 @@ PageType {
                 height: parent.height
                 spacing: 12
 
-                Item { width: parent.width; height: 16; Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: qsTr("LOCATIONS"); color: root.dim; font.pixelSize: 11; font.weight: 700 } Text { visible: root.apiMode; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: qsTr("Protocols and configs"); color: root.mute; font.pixelSize: 11; font.weight: 700; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { ServersUiController.setProcessedServerId(root.apiServerId); PageController.showBusyIndicator(true); SubscriptionUiController.getAccountInfo(root.apiServerId, false); PageController.showBusyIndicator(false); PageController.goToPage(PageEnum.PageSettingsApiServerInfo) } } } }
+                Item {
+                    width: parent.width; height: 16
+                    Text { anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; text: qsTr("LOCATIONS"); color: root.dim; font.pixelSize: 11; font.weight: 700 }
+                    Text {
+                        visible: root.apiMode
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: qsTr("Protocols and configs"); color: root.mute; font.pixelSize: 11; font.weight: 700
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { ServersUiController.setProcessedServerId(root.apiServerId); PageController.showBusyIndicator(true); SubscriptionUiController.getAccountInfo(root.apiServerId, false); PageController.showBusyIndicator(false); PageController.goToPage(PageEnum.PageSettingsApiServerInfo) } }
+                    }
+                    Text {
+                        visible: !root.apiMode
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: qsTr("+ Add subscription"); color: root.limeStrong; font.pixelSize: 11; font.weight: 700
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: PageController.goToPage(PageEnum.PageSetupWizardConfigSource) }
+                    }
+                }
 
                 ListView {
                     id: srvList

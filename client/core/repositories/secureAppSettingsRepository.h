@@ -114,6 +114,9 @@ public:
     bool isServerNameMigrationDone() const;
     void setServerNameMigrationDone(bool done);
 
+    QString lastSubscriptionUrl() const;
+    void setLastSubscriptionUrl(const QString &url);
+
 signals:
     void appLanguageChanged(QLocale locale);
     void allowedDnsServersChanged(const QStringList &servers);

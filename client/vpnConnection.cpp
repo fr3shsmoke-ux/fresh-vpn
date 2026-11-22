@@ -161,13 +161,13 @@ void VpnConnection::onConnectionStateChanged(Vpn::ConnectionState state)
             case Vpn::ConnectionState::Disconnected:
             case Vpn::ConnectionState::Error: {
                 auto flushDns = iface->flushDns();
-                if (flushDns.waitForFinished() && flushDns.returnValue())
+                if (flushDns.waitForFinished(1000) && flushDns.returnValue())
                     qDebug() << "VpnConnection::onConnectionStateChanged: Successfully flushed DNS";
                 else
                     qWarning() << "VpnConnection::onConnectionStateChanged: Failed to flush DNS";
 
                 auto clearSavedRoutes = iface->clearSavedRoutes();
-                if (clearSavedRoutes.waitForFinished() && clearSavedRoutes.returnValue())
+                if (clearSavedRoutes.waitForFinished(1000) && clearSavedRoutes.returnValue())
                     qDebug() << "VpnConnection::onConnectionStateChanged: Successfully cleared saved routes";
                 else
                     qWarning() << "VpnConnection::onConnectionStateChanged: Failed to clear saved routes";
@@ -230,8 +230,9 @@ void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
     // re-resolve domains
     for (const QString &site : sites) {
         const auto &cbResolv = [this, site, gw, mode, ips](const QHostInfo &hostInfo) {
-            const QList<QHostAddress> &addresses = hostInfo.addresses();
-            QString ipv4Addr;
+            if (m_connectionState != Vpn::ConnectionState::Connected) {
+                return;
+            }
             for (const QHostAddress &addr : hostInfo.addresses()) {
                 if (addr.protocol() == QAbstractSocket::NetworkLayerProtocol::IPv4Protocol) {
                     const QString &ip = addr.toString();
@@ -242,11 +243,6 @@ void VpnConnection::addSitesRoutes(const QString &gw, amnezia::RouteMode mode)
                         });
                         m_appSettingsRepository->addVpnSite(mode, site, ip);
                     }
-                    IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
-                        auto reply = iface->flushDns();
-                        if (reply.waitForFinished() || !reply.returnValue())
-                            qWarning() << "VpnConnection::addSitesRoutes: Failed to flush DNS";
-                    });
                     break;
                 }
             }
@@ -562,16 +558,24 @@ void VpnConnection::disconnectFromVpn()
                           });
 #endif
 
+    disconnect(m_vpnProtocol.data(), &VpnProtocol::protocolError, this, &VpnConnection::vpnProtocolError);
     m_vpnProtocol->stop();
 
 #if !defined(Q_OS_ANDROID) && !defined(AMNEZIA_DESKTOP)
     m_vpnProtocol->deleteLater();
 #endif
 
+    disconnectSlots();
     m_vpnProtocol = nullptr;
+
+    setConnectionState(Vpn::ConnectionState::Disconnected);
 }
 
 void VpnConnection::setConnectionState(Vpn::ConnectionState state) {
+    if (m_connectionState == state) {
+        return;
+    }
+
     onConnectionStateChanged(state);
 
     if (state == Vpn::Disconnected && m_connectionState == Vpn::Reconnecting)

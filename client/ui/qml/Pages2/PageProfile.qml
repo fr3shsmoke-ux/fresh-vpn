@@ -28,6 +28,7 @@ PageType {
     property bool autoRenewOn: false
     property bool payEnabledKnown: false
     property bool payEnabled: false
+    property bool paying: false
 
     // ---- Подписка: единственный источник — ApiAccountInfoModel (v1/account_info
     // шлюза). Пустое значение означает «модель не наполнена», и тогда строка
@@ -170,13 +171,69 @@ PageType {
         SubscriptionUiController.getRenewalLink(sid)
     }
 
+    function payOrder() {
+        if (root.paying) return
+        var t = root.curTariff()
+        if (!t) return
+        var cost = root.priceOf(t, root.selTerm)
+        if (cost <= 0) return
+
+        var sid = root.findApiServerId()
+        if (sid.length > 0) {
+            SubscriptionUiController.prepareVpnKeyExport(sid)
+        }
+        var key = ("" + SubscriptionUiController.vpnKey).trim()
+
+        if (key.length > 0) {
+            root.paying = true
+            PageController.showBusyIndicator(true)
+            var xhr = new XMLHttpRequest()
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState !== XMLHttpRequest.DONE) return
+                root.paying = false
+                PageController.showBusyIndicator(false)
+                if (xhr.status === 200) {
+                    try {
+                        var res = JSON.parse(xhr.responseText)
+                        var payUrl = res["payment_url"]
+                        if (payUrl && payUrl.length > 0) {
+                            Qt.openUrlExternally(payUrl)
+                            PageController.showNotificationMessage(qsTr("Opening payment page..."))
+                            return
+                        }
+                    } catch(e) {}
+                }
+                Qt.openUrlExternally("https://t.me/Freshads_bot")
+                PageController.showNotificationMessage(qsTr("Opening Telegram bot for payment..."))
+            }
+            try {
+                xhr.open("POST", AppEndpoint.BASE + "/api/client/pay")
+                xhr.setRequestHeader("Content-Type", "application/json")
+                var planCode = t["код"] ? ("" + t["код"]) : (root.isForever(t) ? "forever" : "basic")
+                xhr.send(JSON.stringify({
+                    "key": key,
+                    "plan": planCode,
+                    "months": Number(root.selTerm),
+                    "method": "sbp"
+                }))
+            } catch(e) {
+                root.paying = false
+                PageController.showBusyIndicator(false)
+                Qt.openUrlExternally("https://t.me/Freshads_bot")
+            }
+        } else {
+            Qt.openUrlExternally("https://t.me/Freshads_bot")
+            PageController.showNotificationMessage(qsTr("Opening Telegram bot to get subscription..."))
+        }
+    }
+
     Component.onCompleted: {
         root.fetchTariffs()
         var sid = root.findApiServerId()
-        // Наполняем модель, прежде чем с неё читать: иначе строки подписки и
-        // устройств молчали бы не потому, что данных нет, а потому, что их
-        // никто не спросил.
-        if(sid.length > 0) SubscriptionUiController.getAccountInfo(sid, false)
+        if(sid.length > 0) {
+            SubscriptionUiController.prepareVpnKeyExport(sid)
+            SubscriptionUiController.getAccountInfo(sid, false)
+        }
         root.refreshAccount()
     }
     Connections {
@@ -403,6 +460,30 @@ PageType {
                                 text: root.fmtMoney(root.priceOf(root.curTariff(), root.selTerm))
                                 color: root.fg; font.pixelSize: 19; font.weight: 800
                             }
+                        }
+                    }
+
+                    // ===== Кнопка «Оплатить · сумма» =====
+                    Rectangle {
+                        width: parent.width; height: 50; radius: 14
+                        color: root.paying ? root.limeSoft : (payM.pressed ? root.limeSoft : root.limeStrong)
+                        scale: payM.pressed ? 0.98 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
+                        visible: root.pricesKnown && (root.priceOf(root.curTariff(), root.selTerm) >= 0)
+                        Row {
+                            anchors.centerIn: parent; spacing: 8
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.paying ? qsTr("Processing…") : (qsTr("Pay") + " · " + root.fmtMoney(root.priceOf(root.curTariff(), root.selTerm)))
+                                color: "#0E0E11"; font.pixelSize: 15; font.weight: 800
+                            }
+                        }
+                        MouseArea {
+                            id: payM
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: !root.paying
+                            onClicked: root.payOrder()
                         }
                     }
                 }

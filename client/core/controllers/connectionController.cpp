@@ -383,6 +383,8 @@ void ConnectionController::handleConnectionState(Vpn::ConnectionState state)
 
 void ConnectionController::closeConnection()
 {
+    m_wasConnecting = false;
+    finishFailover(false);
     if (m_vpnConnection) {
         emit closeConnectionRequested();
     }

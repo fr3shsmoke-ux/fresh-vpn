@@ -24,9 +24,10 @@ PageType {
     QtObject {
         id: telegram
 
+        property string botName: ApiAccountInfoModel.getTelegramBotLink().length > 0 ? ApiAccountInfoModel.getTelegramBotLink() : "Freshads_bot"
         readonly property string title: qsTr("Telegram")
-        readonly property string description: "@" + ApiAccountInfoModel.getTelegramBotLink()
-        readonly property string link: "https://t.me/" + ApiAccountInfoModel.getTelegramBotLink()
+        readonly property string description: "@" + botName
+        readonly property string link: "https://t.me/" + botName
     }
 
     QtObject {

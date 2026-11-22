@@ -231,13 +231,17 @@ QJsonObject Deserialize(const QString &trojanUri, QString *alias, QString *errMe
         }
     }
 
+    // uTLS fingerprint
+    if (query.hasQueryItem("fp"))
+    {
+        const auto fp = QUrl::fromPercentEncoding(query.queryItemValue("fp").toUtf8());
+        if (!fp.isEmpty()) {
+            QJsonIO::SetValue(stream, fp, { tlsKey, "fingerprint" });
+        }
+    }
+
     if (security == "reality")
     {
-        if (query.hasQueryItem("fp"))
-        {
-            const auto fp = QUrl::fromPercentEncoding(query.queryItemValue("fp").toUtf8());
-            QJsonIO::SetValue(stream, fp, { "realitySettings", "fingerprint" });
-        }
         if (query.hasQueryItem("pbk"))
         {
             const auto pbk = QUrl::fromPercentEncoding(query.queryItemValue("pbk").toUtf8());

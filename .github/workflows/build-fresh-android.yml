@@ -58,7 +58,7 @@ jobs:
       uses: jurplel/install-qt-action@v4
       with:
         version: ${{ env.QT_VERSION }}
-        host: 'linux'
+        host: 'all_os'
         target: 'android'
         arch: 'android_arm64_v8a'
         modules: 'qtremoteobjects qt5compat qtshadertools'
@@ -71,7 +71,7 @@ jobs:
       uses: jurplel/install-qt-action@v4
       with:
         version: ${{ env.QT_VERSION }}
-        host: 'linux'
+        host: 'all_os'
         target: 'android'
         arch: 'android_x86_64'
         modules: 'qtremoteobjects qt5compat qtshadertools'

@@ -1,0 +1,55 @@
+name: Bi-Directional Mirror Sync
+
+# Mirrors every pushed branch/tag (incl. force-pushes and deletions) between
+# fr3shsmoke-ux/<repo> and 242204373ha/<repo>. The echo push back from the
+# mirror is a no-op (same SHA), so there is no infinite loop.
+on:
+  push:
+    branches: ['**']
+    tags: ['**']
+
+concurrency:
+  group: mirror-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: "!contains(github.event.head_commit.message, '[skip-mirror]')"
+    runs-on: ubuntu-latest
+    env:
+      TARGET_PAT: ${{ secrets.TARGET_PAT }}
+    steps:
+      - name: Resolve target repository
+        id: t
+        run: |
+          if [ "${{ github.repository_owner }}" = "fr3shsmoke-ux" ]; then T=242204373ha; else T=fr3shsmoke-ux; fi
+          echo "repo=$T/${{ github.event.repository.name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Mirror deletion
+        if: github.event.deleted
+        run: |
+          git init -q m && cd m
+          git -c http.extraheader= push "https://x-access-token:${TARGET_PAT}@github.com/${{ steps.t.outputs.repo }}.git" --delete "${GITHUB_REF}" || echo "already deleted"
+
+      - name: Checkout
+        if: "!github.event.deleted"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Push to mirror
+        if: "!github.event.deleted"
+        run: |
+          git config --local --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+          URL="https://x-access-token:${TARGET_PAT}@github.com/${{ steps.t.outputs.repo }}.git"
+          REMOTE_SHA=$(git -c http.extraheader= ls-remote "$URL" "$GITHUB_REF" | cut -f1)
+          if [ "$REMOTE_SHA" = "$GITHUB_SHA" ]; then echo "mirror already up to date"; exit 0; fi
+          if [ -n "$REMOTE_SHA" ] && [ "${{ github.event.forced }}" != "true" ]; then
+            git -c http.extraheader= fetch -q "$URL" "$GITHUB_REF" || true
+            if git merge-base --is-ancestor "$GITHUB_SHA" "$REMOTE_SHA" 2>/dev/null; then
+              echo "mirror is ahead (echo push) - nothing to do"; exit 0
+            fi
+          fi
+          F=""; [ "${{ github.event.forced }}" = "true" ] && F="--force"
+          git -c http.extraheader= push $F "$URL" "${GITHUB_SHA}:${GITHUB_REF}"

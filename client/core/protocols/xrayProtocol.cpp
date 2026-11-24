@@ -68,6 +68,7 @@ ErrorCode XrayProtocol::start()
 {
     qDebug() << "XrayProtocol::start()";
 
+    m_isStopping = false;
     setConnectionState(Vpn::ConnectionState::Connecting);
 
     // Inject SOCKS5 auth into the inbound before starting xray.
@@ -120,49 +121,50 @@ ErrorCode XrayProtocol::start()
 
 void XrayProtocol::stop()
 {
+    if (m_isStopping) {
+        return;
+    }
+    m_isStopping = true;
+
     qDebug() << "XrayProtocol::stop()";
+
+    if (m_tun2socksProcess) {
+        auto proc = m_tun2socksProcess;
+        m_tun2socksProcess.reset();
+        QObject::disconnect(proc.data(), nullptr, this, nullptr);
+        proc->blockSignals(true);
+
+#ifndef Q_OS_WIN
+        proc->terminate();
+        proc->kill();
+#else
+        proc->kill();
+#endif
+
+        proc->close();
+    }
 
     IpcClient::withInterface([](QSharedPointer<IpcInterfaceReplica> iface) {
         auto disableKillSwitch = iface->disableKillSwitch();
-        if (!disableKillSwitch.waitForFinished() || !disableKillSwitch.returnValue())
+        if (!disableKillSwitch.waitForFinished(1000) || !disableKillSwitch.returnValue())
             qWarning() << "Failed to disable killswitch";
 
         auto StartRoutingIpv6 = iface->StartRoutingIpv6();
-        if (!StartRoutingIpv6.waitForFinished() || !StartRoutingIpv6.returnValue())
+        if (!StartRoutingIpv6.waitForFinished(1000) || !StartRoutingIpv6.returnValue())
             qWarning() << "Failed to start routing ipv6";
 
         auto restoreResolvers = iface->restoreResolvers();
-        if (!restoreResolvers.waitForFinished() || !restoreResolvers.returnValue())
+        if (!restoreResolvers.waitForFinished(1000) || !restoreResolvers.returnValue())
             qWarning() << "Failed to restore resolvers";
 
         auto deleteTun = iface->deleteTun(tunName);
-        if (!deleteTun.waitForFinished() || !deleteTun.returnValue())
+        if (!deleteTun.waitForFinished(1000) || !deleteTun.returnValue())
             qWarning() << "Failed to delete tun";
 
         auto xrayStop = iface->xrayStop();
-        if (!xrayStop.waitForFinished() || !xrayStop.returnValue())
+        if (!xrayStop.waitForFinished(1000) || !xrayStop.returnValue())
             qWarning() << "Failed to stop xray";
     });
-
-    if (m_tun2socksProcess) {
-        m_tun2socksProcess->blockSignals(true);
-
-#ifndef Q_OS_WIN
-        m_tun2socksProcess->terminate();
-        auto waitForFinished = m_tun2socksProcess->waitForFinished(1000);
-        if (!waitForFinished.waitForFinished() || !waitForFinished.returnValue()) {
-            qWarning() << "Failed to terminate tun2socks. Killing the process...";
-            m_tun2socksProcess->kill();
-        }
-#else
-        // terminate does not do anything useful on Windows
-        // so just kill the process
-        m_tun2socksProcess->kill();
-#endif
-
-        m_tun2socksProcess->close();
-        m_tun2socksProcess.reset();
-    }
 
     setConnectionState(Vpn::ConnectionState::Disconnected);
 }
@@ -170,7 +172,7 @@ void XrayProtocol::stop()
 ErrorCode XrayProtocol::startTun2Socks()
 {
     m_tun2socksProcess = IpcClient::CreatePrivilegedProcess();
-    if (!m_tun2socksProcess->waitForSource()) {
+    if (!m_tun2socksProcess || !m_tun2socksProcess->waitForSource()) {
         return ErrorCode::AmneziaServiceConnectionFailed;
     }
 
@@ -182,8 +184,16 @@ ErrorCode XrayProtocol::startTun2Socks()
     connect(
             m_tun2socksProcess.data(), &IpcProcessInterfaceReplica::readyReadStandardError, this, 
             [this]() {
-                auto readAllStandardError = m_tun2socksProcess->readAllStandardError();
-                if (!readAllStandardError.waitForFinished()) {
+                if (m_isStopping || !m_tun2socksProcess) {
+                    return;
+                }
+                auto proc = m_tun2socksProcess;
+                if (!proc) {
+                    return;
+                }
+
+                auto readAllStandardError = proc->readAllStandardError();
+                if (!readAllStandardError.waitForFinished(500)) {
                     qWarning() << "Failed to read output from tun2socks";
                     return;
                 }
@@ -194,7 +204,10 @@ ErrorCode XrayProtocol::startTun2Socks()
                     qDebug() << "[tun2socks]:" << line;
 
                 if (line.contains("[STACK] tun://") && line.contains("<-> socks5://")) {
-                    disconnect(m_tun2socksProcess.data(), &IpcProcessInterfaceReplica::readyReadStandardOutput, this, nullptr);
+                    if (m_isStopping) {
+                        return;
+                    }
+                    disconnect(proc.data(), &IpcProcessInterfaceReplica::readyReadStandardError, this, nullptr);
 
                     if (ErrorCode res = setupRouting(); res != ErrorCode::NoError) {
                         stop();
@@ -209,14 +222,20 @@ ErrorCode XrayProtocol::startTun2Socks()
     connect(
             m_tun2socksProcess.data(), &IpcProcessInterfaceReplica::finished, this,
             [this](int exitCode, QProcess::ExitStatus exitStatus) {
+                if (m_isStopping || !m_tun2socksProcess) {
+                    return;
+                }
+                auto proc = m_tun2socksProcess;
+                if (!proc) {
+                    return;
+                }
+
                 // Check stdout for "resource busy" — the TUN device was not yet released
                 // by the previous tun2socks instance. Retry after a short delay.
                 bool resourceBusy = false;
-                if (m_tun2socksProcess) {
-                    auto readOut = m_tun2socksProcess->readAllStandardOutput();
-                    if (readOut.waitForFinished()) {
-                        resourceBusy = readOut.returnValue().contains("resource busy");
-                    }
+                auto readOut = proc->readAllStandardOutput();
+                if (readOut.waitForFinished(500)) {
+                    resourceBusy = readOut.returnValue().contains("resource busy");
                 }
 
                 if (resourceBusy && m_tun2socksRetryCount < maxTun2SocksRetries) {
@@ -226,6 +245,9 @@ ErrorCode XrayProtocol::startTun2Socks()
                                       .arg(maxTun2SocksRetries)
                                       .arg(tun2socksRetryDelayMs);
                     QTimer::singleShot(tun2socksRetryDelayMs, this, [this]() {
+                        if (m_isStopping) {
+                            return;
+                        }
                         if (ErrorCode err = startTun2Socks(); err != ErrorCode::NoError) {
                             stop();
                             setLastError(err);
@@ -235,6 +257,10 @@ ErrorCode XrayProtocol::startTun2Socks()
                 }
 
                 m_tun2socksRetryCount = 0;
+
+                if (m_isStopping) {
+                    return;
+                }
 
                 if (exitStatus == QProcess::ExitStatus::CrashExit) {
                     qCritical() << "Tun2socks process crashed!";

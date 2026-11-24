@@ -1,4 +1,5 @@
 #include "importUiController.h"
+#include "hwidHeaders.h"
 
 #include <QDebug>
 #include <QFile>
@@ -90,6 +91,9 @@ bool ImportUiController::extractConfigFromData(QString data)
             return false;
         }
         data = body.trimmed();
+        if (m_importController && m_importController->appSettingsRepository()) {
+            m_importController->appSettingsRepository()->setLastSubscriptionUrl(url);
+        }
     }
 
     const auto results = m_importController->extractAllConfigsFromData(data);
@@ -379,6 +383,7 @@ QString ImportUiController::fetchSubscriptionBody(const QString &url, QString &e
     // base64 share-URI list, which the core parser understands universally.
     request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("v2rayNG/1.8.5 (FreshVPN)"));
     request.setRawHeader("Accept", "*/*");
+    FreshHwid::applyHeaders(request);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
     QNetworkReply *reply = manager.get(request);
@@ -413,4 +418,53 @@ QString ImportUiController::fetchSubscriptionBody(const QString &url, QString &e
 
     reply->deleteLater();
     return body;
+}
+
+QString ImportUiController::lastSubscriptionUrl() const
+{
+    if (m_importController && m_importController->appSettingsRepository()) {
+        return m_importController->appSettingsRepository()->lastSubscriptionUrl();
+    }
+    return QString();
+}
+
+bool ImportUiController::hasSubscriptionUrl() const
+{
+    return !lastSubscriptionUrl().trimmed().isEmpty();
+}
+
+bool ImportUiController::refreshSubscription()
+{
+    const QString url = lastSubscriptionUrl();
+    if (url.trimmed().isEmpty()) {
+        qWarning() << "No saved subscription URL to refresh";
+        emit subscriptionRefreshed(false, 0);
+        return false;
+    }
+
+    QString fetchError;
+    const QString body = fetchSubscriptionBody(url, fetchError);
+    if (body.trimmed().isEmpty()) {
+        qWarning() << "Subscription refresh failed:" << fetchError;
+        emit subscriptionRefreshed(false, 0);
+        return false;
+    }
+
+    const auto results = m_importController->extractAllConfigsFromData(body.trimmed());
+    QList<QJsonObject> configs;
+    for (const auto &result : results) {
+        if (result.errorCode == ErrorCode::NoError && !result.config.isEmpty()) {
+            configs.append(result.config);
+        }
+    }
+
+    if (configs.isEmpty()) {
+        qWarning() << "Subscription refresh parsed 0 valid configs";
+        emit subscriptionRefreshed(false, 0);
+        return false;
+    }
+
+    m_importController->importConfigs(configs);
+    emit subscriptionRefreshed(true, configs.size());
+    return true;
 }

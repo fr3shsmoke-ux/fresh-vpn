@@ -21,6 +21,7 @@
         <file>Components/TransportProtoSelector.qml</file>
         <file>Components/AddSitePanel.qml</file>
         <file>Components/countrynames.js</file>
+        <file>Components/appendpoint.js</file>
         <file>Config/GlobalConfig.qml</file>
         <file>Config/qmldir</file>
         <file>Controls2/BackButtonType.qml</file>

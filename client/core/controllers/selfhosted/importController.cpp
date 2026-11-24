@@ -492,18 +492,6 @@ bool ImportController::addServerFromConfig(const QJsonObject &config)
     credentials.secretData = config.value(configKey::password).toString();
 
     if (credentials.isValid() || config.contains(configKey::containers)) {
-        // Dedup by hostName: on subscription re-import, do not create duplicate servers.
-        const QString newHost = config.value(configKey::hostName).toString();
-        if (!newHost.isEmpty()) {
-            const QVector<QString> existingIds = m_serversRepository->orderedServerIds();
-            for (const QString &id : existingIds) {
-                const auto nc = m_serversRepository->nativeConfig(id);
-                if (nc.has_value() && nc->hostName == newHost) {
-                    qDebug() << "Skipping duplicate subscription server (host already present)";
-                    return true;
-                }
-            }
-        }
         QJsonObject configToAdd = config;
         // #6 Fresh: prefer AmneziaWG by default when the bundle provides an AWG container.
         const QJsonArray awgCheckContainers = config.value(configKey::containers).toArray();
@@ -513,6 +501,34 @@ bool ImportController::addServerFromConfig(const QJsonObject &config)
                 break;
             }
         }
+
+        const QString newHost = configToAdd.value(configKey::hostName).toString();
+        const QString newDesc = configToAdd.value(configKey::description).toString();
+        const QVector<QString> existingIds = m_serversRepository->orderedServerIds();
+
+        // 1. If an existing server has the exact same name/description, update it with new keys/IPs!
+        if (!newDesc.isEmpty()) {
+            for (const QString &id : existingIds) {
+                const auto nc = m_serversRepository->nativeConfig(id);
+                if (nc.has_value() && nc->description == newDesc) {
+                    qDebug() << "Updating existing subscription server:" << newDesc;
+                    m_serversRepository->editServer(id, configToAdd, serverConfigUtils::configTypeFromJson(configToAdd));
+                    return true;
+                }
+            }
+        }
+
+        // 2. Only if no description is provided, deduplicate by hostName
+        if (!newHost.isEmpty() && newDesc.isEmpty()) {
+            for (const QString &id : existingIds) {
+                const auto nc = m_serversRepository->nativeConfig(id);
+                if (nc.has_value() && nc->hostName == newHost) {
+                    qDebug() << "Skipping duplicate subscription server (host already present)";
+                    return true;
+                }
+            }
+        }
+
         m_serversRepository->addServer(QString(), configToAdd, serverConfigUtils::configTypeFromJson(configToAdd));
         return true;
     } else if (config.contains(configKey::configVersion)) {

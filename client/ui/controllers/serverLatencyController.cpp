@@ -1,4 +1,5 @@
 #include "serverLatencyController.h"
+#include "hwidHeaders.h"
 
 #include <QTcpSocket>
 #include <QElapsedTimer>
@@ -152,6 +153,7 @@ void ServerLatencyController::measureCountries(const QString& subscriptionKey)
     QNetworkRequest req(url);
     // Subscription endpoints commonly gate on the client user-agent.
     req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("Happ/1.0"));
+    FreshHwid::applyHeaders(req);
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 
     QNetworkReply* reply = m_net->get(req);

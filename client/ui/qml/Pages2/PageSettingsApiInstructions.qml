@@ -32,7 +32,28 @@ PageType {
 
     // #8 Happ deep-link: on click, copy the link AND open Happ with it imported (if installed).
     function apiServerId(){ var n = ServersUiController.getServersCount(); for(var i=0;i<n;i++){ var sid = "" + ServersUiController.getServerId(i); if(ServersUiController.isServerFromApi(sid)) return sid } return "" }
-    function openInHapp(){ var link = "" + SubscriptionUiController.vpnKey; if(link.length === 0) return false; Qt.openUrlExternally("happ://add/" + encodeURIComponent(link)); return true }
+    function copyLinkWithFeedback(msg) {
+        var sid = root.apiServerId()
+        if (sid.length > 0) SubscriptionUiController.prepareVpnKeyExport(sid)
+        var key = ("" + SubscriptionUiController.vpnKey).trim()
+        if (key.length > 0) {
+            SubscriptionUiController.copyVpnKeyToClipboard()
+            PageController.showNotificationMessage(msg ? msg : qsTr("Link copied"))
+        } else {
+            PageController.showNotificationMessage(qsTr("No subscription loaded. Add subscription on Home screen or via @Freshads_bot"))
+        }
+    }
+    function openInHapp(){
+        var sid = root.apiServerId()
+        if (sid.length > 0) SubscriptionUiController.prepareVpnKeyExport(sid)
+        var link = ("" + SubscriptionUiController.vpnKey).trim()
+        if (link.length === 0) {
+            PageController.showNotificationMessage(qsTr("No subscription loaded. Add subscription on Home screen or via @Freshads_bot"))
+            return false
+        }
+        Qt.openUrlExternally("happ://add/" + encodeURIComponent(link))
+        return true
+    }
     Component.onCompleted: { var sid = root.apiServerId(); if(sid.length>0) SubscriptionUiController.prepareVpnKeyExport(sid) }
 
     // Вопросы берём из общего файла FreshFaq.js — он генерится из faq.json
@@ -132,7 +153,7 @@ PageType {
                         Image { source: "qrc:/images/controls/copy.svg"; width: 18; height: 18; anchors.verticalCenter: parent.verticalCenter; opacity: 0.7 }
                     }
                     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                        onClicked: { SubscriptionUiController.copyVpnKeyToClipboard(); PageController.showNotificationMessage(qsTr("Link copied")) } }
+                        onClicked: root.copyLinkWithFeedback(qsTr("Link copied")) }
                 }
 
                 // Device picker
@@ -199,7 +220,7 @@ PageType {
                             Text { anchors.verticalCenter: parent.verticalCenter; text: qsTr("Copy config / subscription"); color: root.limeStrong; font.pixelSize: 14; font.weight: 700 }
                             Image { source: "qrc:/images/controls/copy.svg"; width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter; opacity: 0.7 }
                         }
-                        MouseArea { id: rtM; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { SubscriptionUiController.copyVpnKeyToClipboard(); PageController.showNotificationMessage(qsTr("Copied — import it into the router (OpenWRT / Keenetic)")) } }
+                        MouseArea { id: rtM; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.copyLinkWithFeedback(qsTr("Copied — import it into the router (OpenWRT / Keenetic)")) }
                     }
 
                     // Option 1 - Fresh VPN (our app)
@@ -244,7 +265,7 @@ PageType {
                                 Image { source: "qrc:/images/controls/copy.svg"; width: 15; height: 15; anchors.verticalCenter: parent.verticalCenter; opacity: 0.7 }
                                 Text { anchors.verticalCenter: parent.verticalCenter; text: qsTr("Copy link"); color: root.mute; font.pixelSize: 13; font.weight: 700 }
                             }
-                            MouseArea { id: cpM; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { SubscriptionUiController.copyVpnKeyToClipboard(); PageController.showNotificationMessage(qsTr("Link copied - paste it into Happ")) } }
+                            MouseArea { id: cpM; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.copyLinkWithFeedback(qsTr("Link copied - paste it into Happ")) }
                         }
                     }
                 }

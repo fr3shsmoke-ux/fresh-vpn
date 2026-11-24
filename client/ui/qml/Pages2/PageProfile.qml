@@ -2,6 +2,7 @@ import QtQuick
 import PageEnum 1.0
 import Style 1.0
 import "../Controls2"
+import "../Components/appendpoint.js" as AppEndpoint
 
 PageType {
     id: root
@@ -10,17 +11,32 @@ PageType {
     property color line: AmneziaStyle.fresh.line; property color fg: AmneziaStyle.fresh.fg; property color mute: AmneziaStyle.fresh.mute; property color dim: AmneziaStyle.fresh.dim
     property color lime: AmneziaStyle.fresh.lime; property color limeStrong: AmneziaStyle.fresh.limeStrong
     property color limeSoft: AmneziaStyle.fresh.limeSoft; property color limeLine: AmneziaStyle.fresh.limeLine
-    property color ok: AmneziaStyle.fresh.ok
 
-    // ---- visual mockup state (UI only, no billing backend wired yet) ----
-    property int selectedPlan: 1
-    property bool autopayOn: true
-    property var plans: [
-        { id: 0, nm: qsTr("1 month"),    price: "299 ₽",   per: qsTr("299 ₽/mo"), save: "" },
-        { id: 1, nm: qsTr("12 months"), price: "1 990 ₽", per: qsTr("166 ₽/mo"), save: "−44%" },
-        { id: 2, nm: qsTr("24 months"),  price: "2 990 ₽", per: qsTr("125 ₽/mo"), save: "−58%" }
-    ]
-    property var history: []
+    // ---- Прайс: канон цен живёт в billing.PLANS мини-приложения и приходит
+    // ручкой /api/client/tariffs. Своих чисел цены экран не держит ни одного:
+    // запасное число и есть тот дефект, который здесь починен. До 02.10.2026
+    // здесь стоял массив «299 ₽ / 1 990 ₽ / 2 990 ₽», выдуманный клиентом.
+    property var tariffs: []
+    property string currency: ""
+    property bool pricesKnown: false
+    property bool pricesFailed: false
+    property int selTariff: -1
+    property int selTerm: -1
+
+    // Поля того же ответа. Сервер говорит об автопродлении прямо, а не молчанием.
+    property bool autoRenewKnown: false
+    property bool autoRenewOn: false
+    property bool payEnabledKnown: false
+    property bool payEnabled: false
+    property bool paying: false
+
+    // ---- Подписка: единственный источник — ApiAccountInfoModel (v1/account_info
+    // шлюза). Пустое значение означает «модель не наполнена», и тогда строка
+    // не рисуется вовсе: промолчать честнее, чем назвать придуманное.
+    property string accStatus: ""
+    property string accEnd: ""
+    property string accDevices: ""
+    property bool renewAvailable: false
 
     // The OS used to be hardcoded to "Windows", which reads as a plain lie on
     // a phone. Qt.platform.os is the real thing.
@@ -36,8 +52,194 @@ PageType {
     }
 
     function goP(p){ PageController.goToPage(p) }
-    function stub(){ PageController.showNotificationMessage(qsTr("Payment will be connected on the next step")) }
-    function payText(){ return qsTr("Pay · ") + root.plans[root.selectedPlan].price }
+
+    // ---- Прайс ----------------------------------------------------------
+    function fetchTariffs(){
+        var xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function(){
+            if(xhr.readyState !== XMLHttpRequest.DONE) return
+            if(xhr.status !== 200){ root.pricesFailed = true; root.pricesKnown = false; return }
+            try {
+                var d = JSON.parse(xhr.responseText)
+                var arr = d["тарифы"]
+                if(!arr || arr.length === 0){ root.pricesFailed = true; root.pricesKnown = false; return }
+                root.currency = (d["валюта"] !== undefined) ? ("" + d["валюта"]) : ""
+                root.tariffs = arr
+                if(d["автопродление"] !== undefined){ root.autoRenewOn = !!d["автопродление"]; root.autoRenewKnown = true }
+                if(d["оплата_включена"] !== undefined){ root.payEnabled = !!d["оплата_включена"]; root.payEnabledKnown = true }
+                root.selTariff = 0
+                var t0 = root.tariffs[0]
+                var s0 = t0 ? t0["сроки"] : null
+                // Срок берём первым из порядка, в котором его назвал сервер:
+                // выбор «по выгоде» был бы предпочтением, которого клиент не знает.
+                root.selTerm = (s0 && s0.length > 0) ? Number(s0[0]) : -1
+                root.pricesFailed = false
+                root.pricesKnown = true
+            } catch(e){ root.pricesFailed = true; root.pricesKnown = false }
+        }
+        // Спрашиваем раз при открытии экрана: счётчик сервера — 60 запросов
+        // за 5 минут с одного источника. Ключ не передаём: ключ неверного вида
+        // даёт 404 на весь запрос, и экран остался бы без цен вовсе.
+        try { xhr.open("GET", AppEndpoint.tariffsUrl()); xhr.send() } catch(e){ root.pricesFailed = true; root.pricesKnown = false }
+    }
+
+    function curTariff(){ return (root.selTariff >= 0 && root.selTariff < root.tariffs.length) ? root.tariffs[root.selTariff] : null }
+    function isForever(t){ return !!(t && t["бессрочный"]) }
+    function termsOf(t){ var s = t ? t["сроки"] : null; return s ? s : [] }
+    function priceOf(t, term){
+        if(!t) return -1
+        var p = t["цены"]
+        if(!p) return -1
+        // Ключи «цены» — СТРОКИ месяцев; у бессрочного ключ "0" значит
+        // «не измеряется месяцами», а не «ноль месяцев».
+        var v = p["" + term]
+        return (v === undefined || v === null) ? -1 : Number(v)
+    }
+
+    function curSym(){
+        if(root.currency.length === 0) return ""
+        var m = { "RUB": "₽", "USD": "$", "EUR": "€" }
+        // Знак — только начертание для кода, который назвал сервер; не знаем
+        // начертания — печатаем сам код, а не подставляем правдоподобный.
+        return m[root.currency] ? m[root.currency] : root.currency
+    }
+    function groupNum(v){
+        var s = "" + Math.round(Number(v))
+        var out = ""
+        for(var i = 0; i < s.length; i++){ if(i > 0 && (s.length - i) % 3 === 0) out += " "; out += s[i] }
+        return out
+    }
+    function fmtMoney(v){ if(Number(v) < 0) return ""; var s = root.curSym(); return s.length > 0 ? (root.groupNum(v) + " " + s) : root.groupNum(v) }
+
+    function termLabel(t, term){
+        // Бессрочный срок рисуется знаком ∞, а не числом дней.
+        if(root.isForever(t) || Number(term) === 0) return "∞"
+        return qsTr("%1 mo").arg(Number(term))
+    }
+    function perMonthText(t, term){
+        if(root.isForever(t) || Number(term) === 0) return ""
+        var p = root.priceOf(t, term)
+        if(p < 0 || Number(term) <= 0) return ""
+        return qsTr("%1/mo").arg(root.fmtMoney(p / Number(term)))
+    }
+    function saveLabel(t, term){
+        // Скидка считается из чисел сервера — цены за месяц против цены срока.
+        if(root.isForever(t) || Number(term) <= 1) return ""
+        var one = root.priceOf(t, 1)
+        var many = root.priceOf(t, term)
+        if(one <= 0 || many < 0) return ""
+        var pct = Math.round((1 - (many / Number(term)) / one) * 100)
+        return pct > 0 ? ("−" + pct + "%") : ""
+    }
+    function minPerMonth(t){
+        var terms = root.termsOf(t)
+        var best = -1
+        for(var i = 0; i < terms.length; i++){
+            var n = Number(terms[i])
+            if(n <= 0) continue
+            var p = root.priceOf(t, n)
+            if(p < 0) continue
+            var per = p / n
+            if(best < 0 || per < best) best = per
+        }
+        return best
+    }
+
+    // ---- Подписка -------------------------------------------------------
+    function findApiServerId(){
+        var n = ServersUiController.getServersCount()
+        for(var i = 0; i < n; i++){
+            var sid = "" + ServersUiController.getServerId(i)
+            if(ServersUiController.isServerFromApi(sid)) return sid
+        }
+        return ""
+    }
+    function refreshAccount(){
+        root.accStatus = "" + ApiAccountInfoModel.data("subscriptionStatus")
+        root.accEnd = "" + ApiAccountInfoModel.data("endDate")
+        root.accDevices = "" + ApiAccountInfoModel.data("connectedDevices")
+        var sid = root.findApiServerId()
+        root.renewAvailable = sid.length > 0
+                && ServersUiController.isServerRenewalAvailable(sid)
+                && !ApiAccountInfoModel.data("isInAppPurchase")
+    }
+    function doRenew(){
+        var sid = root.findApiServerId()
+        if(sid.length === 0) return
+        // Цепочка целиком: getRenewalLink → v1/renewal_link шлюза →
+        // renewalLinkReceived → main2.qml:522 Qt.openUrlExternally.
+        SubscriptionUiController.getRenewalLink(sid)
+    }
+
+    function payOrder() {
+        if (root.paying) return
+        var t = root.curTariff()
+        if (!t) return
+        var cost = root.priceOf(t, root.selTerm)
+        if (cost <= 0) return
+
+        var sid = root.findApiServerId()
+        if (sid.length > 0) {
+            SubscriptionUiController.prepareVpnKeyExport(sid)
+        }
+        var key = ("" + SubscriptionUiController.vpnKey).trim()
+
+        if (key.length > 0) {
+            root.paying = true
+            PageController.showBusyIndicator(true)
+            var xhr = new XMLHttpRequest()
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState !== XMLHttpRequest.DONE) return
+                root.paying = false
+                PageController.showBusyIndicator(false)
+                if (xhr.status === 200) {
+                    try {
+                        var res = JSON.parse(xhr.responseText)
+                        var payUrl = res["payment_url"]
+                        if (payUrl && payUrl.length > 0) {
+                            Qt.openUrlExternally(payUrl)
+                            PageController.showNotificationMessage(qsTr("Opening payment page..."))
+                            return
+                        }
+                    } catch(e) {}
+                }
+                Qt.openUrlExternally("https://t.me/Freshads_bot")
+                PageController.showNotificationMessage(qsTr("Opening Telegram bot for payment..."))
+            }
+            try {
+                xhr.open("POST", AppEndpoint.BASE + "/api/client/pay")
+                xhr.setRequestHeader("Content-Type", "application/json")
+                var planCode = t["код"] ? ("" + t["код"]) : (root.isForever(t) ? "forever" : "basic")
+                xhr.send(JSON.stringify({
+                    "key": key,
+                    "plan": planCode,
+                    "months": Number(root.selTerm),
+                    "method": "sbp"
+                }))
+            } catch(e) {
+                root.paying = false
+                PageController.showBusyIndicator(false)
+                Qt.openUrlExternally("https://t.me/Freshads_bot")
+            }
+        } else {
+            Qt.openUrlExternally("https://t.me/Freshads_bot")
+            PageController.showNotificationMessage(qsTr("Opening Telegram bot to get subscription..."))
+        }
+    }
+
+    Component.onCompleted: {
+        root.fetchTariffs()
+        var sid = root.findApiServerId()
+        if(sid.length > 0) {
+            SubscriptionUiController.prepareVpnKeyExport(sid)
+            SubscriptionUiController.getAccountInfo(sid, false)
+        }
+        root.refreshAccount()
+    }
+    Connections {
+        target: ApiAccountInfoModel
+        function onModelReset(){ root.refreshAccount() }
+    }
 
     Rectangle { anchors.fill: parent; color: root.bg }
 
@@ -105,7 +307,28 @@ PageType {
                 Column {
                     width: parent.width; spacing: 4
                     Text { text: qsTr("Profile"); color: root.fg; font.pixelSize: 26; font.weight: 800 }
-                    Text { text: qsTr("Subscription, payment and devices"); color: root.mute; font.pixelSize: 13 }
+                    // Р6: подзаголовок называет статус и срок подписки из
+                    // ApiAccountInfoModel. Модель пуста — подзаголовок называет
+                    // то, что экран показывает, и не обещает платежей: кнопки,
+                    // которая списывает, на экране нет.
+                    Row {
+                        visible: root.accStatus.length > 0
+                        spacing: 6
+                        Text {
+                            text: root.accStatus
+                            textFormat: Text.RichText
+                            color: root.mute; font.pixelSize: 13
+                        }
+                        Text {
+                            visible: root.accEnd.length > 0
+                            text: qsTr("· until %1").arg(root.accEnd)
+                            color: root.mute; font.pixelSize: 13
+                        }
+                    }
+                    Text {
+                        visible: root.accStatus.length === 0
+                        text: qsTr("Plans and devices"); color: root.mute; font.pixelSize: 13
+                    }
                 }
 
                 // ===== Subscription hero =====
@@ -119,113 +342,239 @@ PageType {
                         spacing: 10
                         Text { text: "Fresh VPN"; color: root.fg; font.pixelSize: 22; font.weight: 800 }
                         Text { width: parent.width; wrapMode: Text.WordWrap
+                               visible: root.pricesKnown
                                text: qsTr("Choose a plan below to activate or extend your subscription"); color: root.mute; font.pixelSize: 13 }
-                        Rectangle { height: 42; radius: 11; width: renT.implicitWidth + 34; color: root.limeStrong
+                        // Р3: «Renew» ведёт в ту же цепочку, что и остальные
+                        // кнопки продления в клиенте. Цепочки нет для этого
+                        // сервера — кнопки нет: двух «продлить» с разным
+                        // поведением на экране быть не должно.
+                        Rectangle { visible: root.renewAvailable
+                            height: 42; radius: 11; width: renT.implicitWidth + 34; color: root.limeStrong
                             Text { id: renT; anchors.centerIn: parent; text: qsTr("Renew"); color: "#0E0E11"; font.pixelSize: 13; font.weight: 800 }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.stub() } }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.doRenew() } }
                     }
                 }
 
-                // ===== Tariffs =====
+                // ===== Tariffs (Р1, Р9) =====
+                // Ни одного числа цены в разметке: всё, что ниже, выведено из
+                // ответа ручки /api/client/tariffs.
                 Column {
+                    id: planBlock
                     width: parent.width; spacing: 10
+                    visible: root.pricesKnown
+                    property var curTerms: root.termsOf(root.curTariff())
+
                     Text { text: qsTr("PLAN"); color: root.dim; font.pixelSize: 11; font.weight: 800; leftPadding: 4 }
                     Grid {
                         id: plansGrid
-                        width: parent.width; columns: 3; rowSpacing: 12; columnSpacing: 12
-                        property real cw: (width - 24) / 3
+                        width: parent.width; columns: 2; rowSpacing: 12; columnSpacing: 12
+                        property real cw: (width - 12) / 2
                         Repeater {
-                            model: root.plans
+                            model: root.tariffs
                             delegate: Rectangle {
-                                width: plansGrid.cw; height: 116; radius: 14
-                                property bool sel: root.selectedPlan === modelData.id
+                                required property var modelData
+                                required property int index
+                                width: plansGrid.cw; height: 112; radius: 14
+                                property bool sel: root.selTariff === index
+                                property real per: root.minPerMonth(modelData)
                                 color: sel ? root.limeSoft : root.card
                                 border.color: sel ? root.limeLine : root.line; border.width: sel ? 2 : 1
-                                Rectangle {
-                                    visible: modelData.save.length > 0
-                                    anchors.top: parent.top; anchors.right: parent.right; anchors.topMargin: 12; anchors.rightMargin: 12
-                                    height: 18; radius: 9; width: svT.implicitWidth + 14; color: root.limeStrong
-                                    Text { id: svT; anchors.centerIn: parent; text: modelData.save; color: "#0E0E11"; font.pixelSize: 10; font.weight: 800 }
-                                }
                                 Column {
-                                    anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                                    anchors.leftMargin: 14; anchors.rightMargin: 14; anchors.bottomMargin: 14; spacing: 4
-                                    Text { width: parent.width; elide: Text.ElideRight; text: modelData.nm; color: root.mute; font.pixelSize: 12; font.weight: 600 }
-                                    Text { text: modelData.price; color: sel ? root.limeStrong : root.fg; font.pixelSize: 19; font.weight: 800 }
-                                    Text { text: modelData.per; color: root.dim; font.pixelSize: 11 }
+                                    anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                                    anchors.leftMargin: 14; anchors.rightMargin: 14; anchors.topMargin: 14; spacing: 4
+                                    Text { width: parent.width; elide: Text.ElideRight
+                                           text: "" + modelData["название"]
+                                           color: sel ? root.limeStrong : root.fg; font.pixelSize: 15; font.weight: 800 }
+                                    Text { width: parent.width; elide: Text.ElideRight
+                                           text: qsTr("%1 devices").arg(Number(modelData["устройств"]))
+                                           color: root.mute; font.pixelSize: 12 }
+                                    Text { width: parent.width; elide: Text.ElideRight
+                                           visible: text.length > 0
+                                           text: root.isForever(modelData)
+                                                 ? qsTr("one payment, no term")
+                                                 : (per >= 0 ? qsTr("from %1/mo").arg(root.fmtMoney(per)) : "")
+                                           color: root.dim; font.pixelSize: 11 }
                                 }
-                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.selectedPlan = modelData.id }
+                                MouseArea {
+                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        root.selTariff = index
+                                        var s = root.termsOf(modelData)
+                                        root.selTerm = (s.length > 0) ? Number(s[0]) : -1
+                                    }
+                                }
                             }
                         }
                     }
-                }
 
-                // ===== Pay button =====
-                Rectangle {
-                    width: parent.width; height: 52; radius: 14; color: root.limeStrong
-                    scale: payM.pressed ? 0.99 : 1.0
-                    Behavior on scale { NumberAnimation { duration: 90 } }
-                    Text { anchors.centerIn: parent; text: root.payText(); color: "#0E0E11"; font.pixelSize: 15; font.weight: 800 }
-                    MouseArea { id: payM; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.stub() }
-                }
-
-                // ===== Autopay =====
-                Rectangle {
-                    width: parent.width; height: 66; radius: 14; color: root.card; border.color: root.line; border.width: 1
-                    Row {
-                        anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: 16; anchors.rightMargin: 16
-                        anchors.verticalCenter: parent.verticalCenter; spacing: 12
-                        Column {
-                            width: parent.width - 46 - 12; anchors.verticalCenter: parent.verticalCenter; spacing: 3
-                            Text { text: qsTr("Auto-renewal"); color: root.fg; font.pixelSize: 14; font.weight: 700 }
-                            Text { width: parent.width; wrapMode: Text.WordWrap; text: qsTr("Renew the subscription automatically before it expires"); color: root.mute; font.pixelSize: 12 }
-                        }
-                        Rectangle {
-                            width: 46; height: 26; radius: 13; anchors.verticalCenter: parent.verticalCenter
-                            color: root.autopayOn ? root.limeStrong : Qt.rgba(1,1,1,0.12)
-                            Behavior on color { ColorAnimation { duration: 150 } }
-                            Rectangle { width: 20; height: 20; radius: 10; y: 3; color: "#FFFFFF"; x: root.autopayOn ? 23 : 3
-                                Behavior on x { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } } }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.autopayOn = !root.autopayOn }
-                        }
-                    }
-                }
-
-                // ===== Payment history =====
-                Column {
-                    visible: root.history.length > 0
-                    width: parent.width; spacing: 10
-                    Text { text: qsTr("PAYMENT HISTORY"); color: root.dim; font.pixelSize: 11; font.weight: 800; leftPadding: 4 }
-                    Column {
+                    // ===== Сроки выбранного тарифа =====
+                    Text { text: qsTr("TERM"); color: root.dim; font.pixelSize: 11; font.weight: 800; leftPadding: 4; topPadding: 4 }
+                    Flow {
                         width: parent.width; spacing: 8
                         Repeater {
-                            model: root.history
+                            model: planBlock.curTerms
                             delegate: Rectangle {
-                                width: parent.width; height: 58; radius: 12; color: root.card; border.color: root.line; border.width: 1
-                                Row {
-                                    anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: 16; anchors.rightMargin: 16
-                                    anchors.verticalCenter: parent.verticalCenter; spacing: 12
-                                    Column {
-                                        width: parent.width - 108; anchors.verticalCenter: parent.verticalCenter; spacing: 2
-                                        Text { width: parent.width; elide: Text.ElideRight; text: modelData.nm; color: root.fg; font.pixelSize: 13; font.weight: 600 }
-                                        Text { text: modelData.d; color: root.mute; font.pixelSize: 11 }
-                                    }
-                                    Column {
-                                        width: 96; anchors.verticalCenter: parent.verticalCenter; spacing: 2
-                                        Text { width: parent.width; horizontalAlignment: Text.AlignRight; text: modelData.a; color: root.fg; font.pixelSize: 13; font.weight: 700 }
-                                        Text { width: parent.width; horizontalAlignment: Text.AlignRight; text: qsTr("Paid"); color: root.ok; font.pixelSize: 10; font.weight: 700 }
-                                    }
+                                required property var modelData
+                                property var t: root.curTariff()
+                                property bool sel: Number(root.selTerm) === Number(modelData)
+                                height: 56; radius: 12
+                                width: Math.max(72, tCol.implicitWidth + 24)
+                                color: sel ? root.limeSoft : root.card
+                                border.color: sel ? root.limeLine : root.line; border.width: sel ? 2 : 1
+                                Column {
+                                    id: tCol
+                                    anchors.centerIn: parent; spacing: 2
+                                    Text { anchors.horizontalCenter: parent.horizontalCenter
+                                           text: root.termLabel(t, modelData)
+                                           color: sel ? root.limeStrong : root.fg; font.pixelSize: 14; font.weight: 800 }
+                                    Text { anchors.horizontalCenter: parent.horizontalCenter
+                                           visible: text.length > 0
+                                           text: root.saveLabel(t, modelData)
+                                           color: root.limeStrong; font.pixelSize: 10; font.weight: 800 }
                                 }
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.selTerm = Number(modelData) }
                             }
                         }
                     }
+
+                    // ===== Цена выбранного =====
+                    Rectangle {
+                        width: parent.width; radius: 14; color: root.card; border.color: root.line; border.width: 1
+                        height: sumRow.implicitHeight + 28
+                        visible: root.priceOf(root.curTariff(), root.selTerm) >= 0
+                        Row {
+                            id: sumRow
+                            anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: 16; anchors.rightMargin: 16
+                            anchors.verticalCenter: parent.verticalCenter; spacing: 10
+                            Column {
+                                width: parent.width - sumVal.implicitWidth - 10
+                                anchors.verticalCenter: parent.verticalCenter; spacing: 3
+                                Text { text: qsTr("Total"); color: root.mute; font.pixelSize: 13 }
+                                Text { visible: text.length > 0
+                                       text: root.perMonthText(root.curTariff(), root.selTerm)
+                                       color: root.dim; font.pixelSize: 11 }
+                            }
+                            Text {
+                                id: sumVal
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.fmtMoney(root.priceOf(root.curTariff(), root.selTerm))
+                                color: root.fg; font.pixelSize: 19; font.weight: 800
+                            }
+                        }
+                    }
+
+                    // ===== Кнопка «Оплатить · сумма» =====
+                    Rectangle {
+                        width: parent.width; height: 50; radius: 14
+                        color: root.paying ? root.limeSoft : (payM.pressed ? root.limeSoft : root.limeStrong)
+                        scale: payM.pressed ? 0.98 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutQuad } }
+                        visible: root.pricesKnown && (root.priceOf(root.curTariff(), root.selTerm) >= 0)
+                        Row {
+                            anchors.centerIn: parent; spacing: 8
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.paying ? qsTr("Processing…") : (qsTr("Pay") + " · " + root.fmtMoney(root.priceOf(root.curTariff(), root.selTerm)))
+                                color: "#0E0E11"; font.pixelSize: 15; font.weight: 800
+                            }
+                        }
+                        MouseArea {
+                            id: payM
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: !root.paying
+                            onClicked: root.payOrder()
+                        }
+                    }
                 }
+
+                // ===== Прайс не отвечает =====
+                // Пустой экран цен и экран без ответа сервера обязаны выглядеть
+                // по-разному: молчание неотличимо от «цен нет».
+                Rectangle {
+                    visible: root.pricesFailed
+                    width: parent.width; radius: 14; color: root.card; border.color: root.line; border.width: 1
+                    height: failCol.implicitHeight + 28
+                    Column {
+                        id: failCol
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: 16; anchors.rightMargin: 16
+                        anchors.verticalCenter: parent.verticalCenter; spacing: 4
+                        Text { text: qsTr("Prices are unavailable right now"); color: root.fg; font.pixelSize: 14; font.weight: 700 }
+                        Text { width: parent.width; wrapMode: Text.WordWrap
+                               text: qsTr("Reopen this screen to ask again"); color: root.mute; font.pixelSize: 12 }
+                    }
+                }
+
+                // ===== Кнопка «Pay · сумма» убрана (Р2) =====
+                // Кнопки, которая называет сумму и не списывает, на экране быть
+                // не должно. Исполнителя оплаты в клиенте нет ни одного, и
+                // заглушка на её месте была ложным показанием, а не макетом.
+                // Что ставить вместо неё — решение Владельца; предложение
+                // вынесено в отчёт по поручению №57.
+
+                // ===== Автопродление (Р4) =====
+                // Тумблер убран: переключать было нечего. Сервер говорит об
+                // автопродлении прямо — строка ниже выведена из его поля
+                // «автопродление», а не написана рукой.
+                Rectangle {
+                    visible: root.autoRenewKnown
+                    width: parent.width; radius: 14; color: root.card; border.color: root.line; border.width: 1
+                    height: arCol.implicitHeight + 28
+                    Column {
+                        id: arCol
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: 16; anchors.rightMargin: 16
+                        anchors.verticalCenter: parent.verticalCenter; spacing: 4
+                        Text {
+                            text: root.autoRenewOn ? qsTr("Auto-renewal is on") : qsTr("No auto-renewal")
+                            color: root.fg; font.pixelSize: 14; font.weight: 700
+                        }
+                        Text {
+                            width: parent.width; wrapMode: Text.WordWrap
+                            text: root.autoRenewOn
+                                  ? qsTr("The subscription is charged automatically before it expires")
+                                  : qsTr("Nothing is ever charged automatically — extend the subscription yourself before it expires")
+                            color: root.mute; font.pixelSize: 12
+                        }
+                    }
+                }
+
+                // ===== Оплата выключена на сервере =====
+                Rectangle {
+                    visible: root.payEnabledKnown && !root.payEnabled
+                    width: parent.width; radius: 14; color: root.card; border.color: root.line; border.width: 1
+                    height: poCol.implicitHeight + 28
+                    Column {
+                        id: poCol
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: 16; anchors.rightMargin: 16
+                        anchors.verticalCenter: parent.verticalCenter; spacing: 4
+                        Text { text: qsTr("Payment is turned off right now"); color: root.fg; font.pixelSize: 14; font.weight: 700 }
+                        Text { width: parent.width; wrapMode: Text.WordWrap
+                               text: qsTr("The prices above are current, but a new subscription cannot be paid for at the moment")
+                               color: root.mute; font.pixelSize: 12 }
+                    }
+                }
+
+                // ===== «PAYMENT HISTORY» убран (Р7) =====
+                // Источника истории платежей нет ни одного — ни в клиенте, ни
+                // в ответе шлюза, ни в ручке мини-приложения. Раздел убран
+                // вместе со свойством `history`, которое всегда было пустым.
 
                 // ===== Devices =====
                 Column {
                     width: parent.width; spacing: 10
                     Text { text: qsTr("DEVICES"); color: root.dim; font.pixelSize: 11; font.weight: 800; leftPadding: 4 }
-                    RowCard { nm: qsTr("This device · %1").arg(root.thisOsName); ds: qsTr("connected now"); icon: "monitor"; clickable: false }
+                    // Р5: счёт устройств — из ApiAccountInfoModel («N out of M»),
+                    // а не одна строка «это устройство». Модель молчит — строки нет.
+                    RowCard {
+                        visible: root.accDevices.length > 0
+                        height: visible ? 48 : 0
+                        nm: qsTr("Devices in the subscription"); ds: root.accDevices; icon: "monitor"; clickable: false
+                    }
+                    // «connected now» было сказано всегда — и когда соединения
+                    // нет. Берём у ConnectionController.
+                    RowCard { nm: qsTr("This device · %1").arg(root.thisOsName)
+                              ds: ConnectionController.isConnected ? qsTr("connected now") : qsTr("not connected")
+                              icon: "monitor"; clickable: false }
                     RowCard { nm: qsTr("Add device"); ds: qsTr("via QR or subscription key"); icon: "qr"; onActivated: root.goP(PageEnum.PageSetupWizardConfigSource) }
                     RowCard { nm: qsTr("Manage servers"); ds: qsTr("node list and settings"); icon: "monitor"; onActivated: root.goP(PageEnum.PageSettingsServersList) }
                     RowCard { nm: qsTr("Support"); ds: qsTr("we will reply in Telegram"); icon: "help"; onActivated: root.goP(PageEnum.PageSettingsApiSupport) }

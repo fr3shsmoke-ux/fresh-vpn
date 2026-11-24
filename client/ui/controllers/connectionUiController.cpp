@@ -100,6 +100,7 @@ void ConnectionUiController::onConnectionStateChanged(Vpn::ConnectionState state
     }
     case Vpn::ConnectionState::Disconnected: {
         m_sessionRx = 0; m_sessionTx = 0; m_rxSpeedMbps = 0.0; m_txSpeedMbps = 0.0;
+        m_speedTimer.invalidate();
         emit trafficChanged();
         m_isConnectionInProgress = false;
         m_connectionStateText = tr("Connect");

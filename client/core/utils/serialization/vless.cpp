@@ -213,20 +213,26 @@ QJsonObject Deserialize(const QString &str, QString *alias, QString *errMessage)
             QJsonIO::SetValue(stream, alpnArray, { tlsKey, "alpn" });
         }
     }
-    // xtls-specific
-    if (security == "xtls" || security == "reality")
+    // flow (XTLS Vision works with security=tls, reality, and xtls)
+    if (query.hasQueryItem("flow"))
     {
         const auto flow = query.queryItemValue("flow");
-        QJsonIO::SetValue(outbound, flow, { "settings", "vnext", 0, "users", 0, "flow" });
+        if (!flow.isEmpty()) {
+            QJsonIO::SetValue(outbound, flow, { "settings", "vnext", 0, "users", 0, "flow" });
+        }
+    }
+
+    // uTLS fingerprint
+    if (query.hasQueryItem("fp"))
+    {
+        const auto fp = QUrl::fromPercentEncoding(query.queryItemValue("fp").toUtf8());
+        if (!fp.isEmpty()) {
+            QJsonIO::SetValue(stream, fp, { tlsKey, "fingerprint" });
+        }
     }
 
     if (security == "reality")
     {
-        if (query.hasQueryItem("fp"))
-        {
-            const auto fp = QUrl::fromPercentEncoding(query.queryItemValue("fp").toUtf8());
-            QJsonIO::SetValue(stream, fp, { "realitySettings", "fingerprint" });
-        }
         if (query.hasQueryItem("pbk"))
         {
             const auto pbk = QUrl::fromPercentEncoding(query.queryItemValue("pbk").toUtf8());

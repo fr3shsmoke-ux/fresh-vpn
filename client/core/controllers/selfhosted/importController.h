@@ -72,6 +72,9 @@ public:
     void importConfigs(const QList<QJsonObject> &configs);
     QJsonObject processNativeWireGuardConfig(const QJsonObject &config);
 
+    SecureServersRepository* serversRepository() const { return m_serversRepository; }
+    SecureAppSettingsRepository* appSettingsRepository() const { return m_appSettingsRepository; }
+
 signals:
     void importFinished();
     void importErrorOccurred(ErrorCode errorCode, bool goToPageHome);

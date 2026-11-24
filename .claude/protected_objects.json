@@ -1,0 +1,6 @@
+[
+  ".claude/hooks/",
+  ".claude/settings.json",
+  ".claude/exchange_paths.json",
+  ".claude/protected_objects.json"
+]
